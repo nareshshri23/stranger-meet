@@ -120,53 +120,6 @@ Edit `frontend/src/App.jsx`:
 const SOKET_URL = 'http://localhost:5000'
 ```
 
-## 🔒 Security Notes
-
-⚠️ **Important**: This is a development version. Before deploying to production:
-
-- [ ] Enable HTTPS/WSS (use Let's Encrypt)
-- [ ] Restrict CORS to specific domains
-- [ ] Add rate limiting to prevent abuse
-- [ ] Implement proper user authentication
-- [ ] Add server-side input validation
-- [ ] Replace IP-based banning with user ID system
-- [ ] Add XSS protection for messages
-- [ ] Implement content moderation
-- [ ] Add monitoring and logging
-
-See [SECURITY.md](./SECURITY.md) for detailed security recommendations.
-
-## 🐛 Known Issues
-
-- Age verification relies on localStorage (easily bypassed)
-- No persistent data storage
-- Single server instance (no clustering)
-- IP-based banning affected by VPNs/shared networks
-- No user authentication system
-
-## 📊 Performance & Capacity
-
-- **Concurrent Users**: 50-300 (single server, development)
-- **Memory Usage**: ~2-5MB per active connection
-- **Recommended Max**: 100-500 users with proper infrastructure
-
-## 🚀 Future Improvements
-
-- [ ] Database integration (MongoDB/PostgreSQL)
-- [ ] User authentication & profiles
-- [ ] Video recording
-- [ ] Screen sharing
-- [ ] Text message history
-- [ ] Friend/block list
-- [ ] Multiple chat rooms
-- [ ] Better content moderation
-- [ ] Horizontal scaling with Redis
-- [ ] Advanced analytics
-
-## 📄 License
-
-This project is open source and available under the MIT License.
-
 ## 👤 Support
 
 For issues, bugs, or feature requests, please open an issue on GitHub.

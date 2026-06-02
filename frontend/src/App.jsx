@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 import { auth, logInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
-const SOKET_URL = 'http://localhost:5000' // Change to your Render URL for production
+const SOKET_URL = 'https://stranger-meet-api.onrender.com' // Change to your Render URL for production
 
 export default function App() {
   const [user, setUser] = useState(null)

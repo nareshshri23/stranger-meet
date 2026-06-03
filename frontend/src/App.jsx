@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 import { auth, logInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
-const SOKET_URL = 'https://stranger-meet-api.onrender.com' // Change to your Render URL for production
+const SOKET_URL = 'https://stranger-meet-api.onrender.com' // Your live backend URL
 
 export default function App() {
   const [user, setUser] = useState(null)
@@ -24,7 +24,6 @@ export default function App() {
   let rtc_conn = useRef(null) 
   let dc_ref = useRef(null)
 
-  // 1. Listen for Google Login State
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
         setUser(currentUser)
@@ -33,11 +32,9 @@ export default function App() {
     return () => unsubscribe();
   }, [])
 
-  // 2. Only connect to socket if a real Google User exists
   useEffect(() => {
     if (!user) return;
 
-    // We pass the secure Google UID as the token to our backend!
     let s = io(SOKET_URL, {
         auth: { token: user.uid }
     })
@@ -104,7 +101,7 @@ export default function App() {
     return () => {
       s.disconnect()
     }
-  }, [user]) // Re-run this hook when the 'user' object changes
+  }, [user])
 
   const hook_up_data_pipe = (pipe) => {
       pipe.onmessage = (event) => {
@@ -208,15 +205,13 @@ export default function App() {
       }
   }
 
-  // --- RENDER BLOCKERS ---
-
   if (authLoading) {
-      return <div className="h-screen bg-neutral-950 flex items-center justify-center text-neutral-500">Loading App...</div>
+      return <div className="h-[100dvh] bg-neutral-950 flex items-center justify-center text-neutral-500">Loading App...</div>
   }
 
   if (am_i_banned) {
       return (
-          <div className="h-screen bg-neutral-950 flex flex-col items-center justify-center text-white p-4 text-center">
+          <div className="h-[100dvh] bg-neutral-950 flex flex-col items-center justify-center text-white p-4 text-center">
               <h1 className="text-4xl font-bold text-red-500 mb-4">ACCESS DENIED</h1>
               <p className="text-neutral-400 max-w-md">Your Google Account has been permanently banned from this platform due to multiple reports of terms of service violations.</p>
           </div>
@@ -225,12 +220,12 @@ export default function App() {
 
   if (!user) {
       return (
-          <div className="h-screen bg-neutral-950 flex flex-col items-center justify-center text-white p-4">
-              <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-lg max-w-md text-center shadow-2xl">
+          <div className="h-[100dvh] bg-neutral-950 flex flex-col items-center justify-center text-white p-4">
+              <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-lg max-w-md w-full text-center shadow-2xl">
                   <h1 className="text-2xl font-bold text-blue-500 mb-4">STRANGER_MEET</h1>
                   <h2 className="text-lg font-semibold mb-4 text-neutral-300">Accountability Required</h2>
                   <p className="text-neutral-400 text-sm mb-8 leading-relaxed">
-                      To ensure a safe environment and maintain legal compliance, anonymous access is strictly prohibited. You must authenticate with a verified Google account to enter the matchmaking queue.
+                      To ensure a safe environment, anonymous access is strictly prohibited. You must authenticate with a verified Google account.
                   </p>
                   <button onClick={logInWithGoogle} className="w-full flex items-center justify-center gap-3 px-6 py-3 rounded bg-white hover:bg-neutral-200 text-black font-semibold transition-colors">
                       <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
@@ -241,75 +236,80 @@ export default function App() {
       )
   }
 
-  // --- MAIN APP RENDER ---
-
   return (
-    <div className="flex flex-col h-screen max-h-screen bg-neutral-950 text-white">
-      <header className="p-4 bg-neutral-900 border-b border-neutral-800 flex justify-between items-center">
-        <h1 className="text-xl font-bold text-blue-500 tracking-wide">STRANGER_MEET</h1>
+    // Replaced h-screen with h-[100dvh] for mobile browsers
+    <div className="flex flex-col h-[100dvh] max-h-[100dvh] bg-neutral-950 text-white overflow-hidden">
+      
+      {/* HEADER: Adjusted text sizes for narrow mobile screens */}
+      <header className="p-3 md:p-4 bg-neutral-900 border-b border-neutral-800 flex justify-between items-center shrink-0">
+        <h1 className="text-base md:text-xl font-bold text-blue-500 tracking-wide truncate mr-2">STRANGER_MEET</h1>
         
-        <div className="flex items-center gap-4">
-          <div className="hidden md:flex items-center gap-2 mr-4">
+        <div className="flex items-center gap-2 md:gap-4">
+          <div className="hidden md:flex items-center gap-2 mr-2">
               <img src={user.photoURL} alt="avatar" className="w-8 h-8 rounded-full border border-neutral-700" />
               <button onClick={logOut} className="text-xs text-neutral-500 hover:text-red-400 transition-colors">Logout</button>
           </div>
-
-          <span className="text-xs bg-neutral-800 px-3 py-1.5 rounded-full text-neutral-400 font-mono hidden md:inline-block">
-            Status: <span className="text-emerald-400 capitalize">{currState}</span>
-          </span>
           
           {currState === 'connected' && (
-              <button onClick={triggerReport} className="px-3 py-1.5 text-xs font-bold rounded bg-red-900/50 text-red-400 border border-red-800 hover:bg-red-800 hover:text-white transition-colors">
+              <button onClick={triggerReport} className="hidden md:block px-3 py-1.5 text-xs font-bold rounded bg-red-900/50 text-red-400 border border-red-800 hover:bg-red-800 hover:text-white transition-colors">
                   Report
               </button>
           )}
 
           <button
             onClick={handleNextBtn}
-            className={`px-5 py-1.5 font-semibold rounded transition-colors ${
+            className={`px-3 md:px-5 py-1.5 text-sm md:text-base font-semibold rounded transition-colors whitespace-nowrap ${
               currState === 'connected' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
             }`}
           >
-            {currState === 'idle' && 'Start Chatting'}
-            {currState === 'searching' && 'Skip Waiting'}
+            {currState === 'idle' && 'Start Chat'}
+            {currState === 'searching' && 'Skip'}
             {currState === 'connected' && 'Next Stranger'}
           </button>
         </div>
       </header>
 
+      {/* MAIN CONTENT AREA */}
       <main className="flex-1 flex flex-col md:flex-row overflow-hidden">
-        <div className="flex-1 grid grid-rows-2 md:grid-rows-1 md:grid-cols-2 gap-2 p-2 bg-neutral-900">
-          <div className="relative bg-black rounded-lg overflow-hidden border border-neutral-800 flex items-center justify-center">
-            <video ref={myVid} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
-            <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-0.5 rounded text-xs">You</div>
-            
-            <div className="absolute top-2 right-2 flex gap-2">
-                <button onClick={toggleMic} className="bg-neutral-800/80 hover:bg-neutral-700 px-2 py-1 rounded text-xs border border-neutral-700 transition-colors">
-                    {isMicOn ? '🎙️ Mic On' : '🔇 Mic Off'}
-                </button>
-                <button onClick={toggleCam} className="bg-neutral-800/80 hover:bg-neutral-700 px-2 py-1 rounded text-xs border border-neutral-700 transition-colors">
-                    {isCamOn ? '📷 Cam On' : '🚫 Cam Off'}
-                </button>
-            </div>
-          </div>
-          <div className="relative bg-black rounded-lg overflow-hidden border border-neutral-800 flex items-center justify-center">
+        
+        {/* VIDEOS: PiP on Mobile, Side-by-Side on Desktop */}
+        <div className="relative w-full h-[40vh] min-h-[250px] md:h-auto md:flex-1 flex md:flex-row gap-2 p-2 bg-neutral-900 shrink-0">
+          
+          {/* Stranger Video (Takes full box on mobile, 50% on desktop) */}
+          <div className="w-full h-full md:w-1/2 bg-black rounded-lg overflow-hidden border border-neutral-800 relative flex items-center justify-center">
             <video ref={otherVid} autoPlay playsInline className="w-full h-full object-cover" />
-            <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-0.5 rounded text-xs">Stranger</div>
+            <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-0.5 rounded text-xs z-20">Stranger</div>
             {currState === 'searching' && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/80 text-sm animate-pulse text-neutral-400">
+              <div className="absolute inset-0 flex items-center justify-center bg-black/80 text-sm animate-pulse text-neutral-400 z-10 text-center px-4">
                 Finding a stranger online...
               </div>
             )}
             {currState === 'idle' && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/80 text-sm text-neutral-500">
-                Click "Start Chatting" to begin.
+              <div className="absolute inset-0 flex items-center justify-center bg-black/80 text-sm text-neutral-500 z-10 text-center px-4">
+                Click "Start Chat" to begin.
               </div>
             )}
           </div>
+
+          {/* Your Video (Floating PiP on mobile, 50% on desktop) */}
+          <div className="absolute bottom-4 right-4 w-24 h-36 md:static md:w-1/2 md:h-full z-30 bg-black rounded-lg overflow-hidden border border-neutral-600 md:border-neutral-800 shadow-2xl md:shadow-none flex items-center justify-center">
+            <video ref={myVid} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
+            <div className="absolute bottom-1 left-1 md:bottom-2 md:left-2 bg-black/60 px-1.5 py-0.5 rounded text-[10px] md:text-xs">You</div>
+            
+            <div className="absolute top-1 right-1 md:top-2 md:right-2 flex flex-col md:flex-row gap-1 md:gap-2">
+                <button onClick={toggleMic} className="bg-neutral-800/80 hover:bg-neutral-700 p-1 md:px-2 md:py-1 rounded text-xs border border-neutral-700 transition-colors" title="Toggle Mic">
+                    {isMicOn ? '🎙️' : '🔇'}
+                </button>
+                <button onClick={toggleCam} className="bg-neutral-800/80 hover:bg-neutral-700 p-1 md:px-2 md:py-1 rounded text-xs border border-neutral-700 transition-colors" title="Toggle Camera">
+                    {isCamOn ? '📷' : '🚫'}
+                </button>
+            </div>
+          </div>
         </div>
 
-        <div className="w-full h-64 md:h-auto md:w-96 flex flex-col border-t md:border-t-0 md:border-l border-neutral-800 bg-neutral-950">
-          <div className="flex-1 p-4 overflow-y-auto space-y-2 text-sm">
+        {/* CHAT AREA */}
+        <div className="flex-1 w-full md:w-96 flex flex-col border-t md:border-t-0 md:border-l border-neutral-800 bg-neutral-950 overflow-hidden min-h-[200px]">
+          <div className="flex-1 p-3 overflow-y-auto space-y-2 text-sm">
             {msgs.map((msg, i) => (
               <div key={i} className={`p-2 rounded max-w-[85%] ${
                 msg.sender === 'system' ? 'bg-neutral-900 text-neutral-400 mx-auto text-center text-xs w-full' :
@@ -321,13 +321,13 @@ export default function App() {
             ))}
           </div>
 
-          <form onSubmit={sendMsg} className="p-3 border-t border-neutral-800 flex gap-2">
+          <form onSubmit={sendMsg} className="p-2 border-t border-neutral-800 flex gap-2 shrink-0 bg-neutral-950 mb-safe">
             <input
               type="text"
               value={txt}
               onChange={(e) => setTxt(e.target.value)}
               disabled={currState !== 'connected'}
-              placeholder={currState === 'connected' ? "Type a message..." : "Connect to a stranger first..."}
+              placeholder={currState === 'connected' ? "Message..." : "Connect first..."}
               className="flex-1 bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
             />
             <button

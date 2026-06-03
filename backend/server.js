@@ -17,7 +17,8 @@ app.get('/health', (req, res) => {
 const server = createServer(app);
 const io = new Server(server, {
     cors: { 
-        origin: SAFE_ORIGIN, 
+        // We removed SAFE_ORIGIN and put the exact allowed websites right here
+        origin: ["http://localhost:5173", "https://stranger-meet-two.vercel.app"], 
         methods: ["GET", "POST"] 
     }
 });

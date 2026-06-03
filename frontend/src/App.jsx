@@ -250,11 +250,12 @@ export default function App() {
               <button onClick={logOut} className="text-xs text-neutral-500 hover:text-red-400 transition-colors">Logout</button>
           </div>
           
-          {currState === 'connected' && (
+          {/* report button */}
+          {/* {currState === 'connected' && (
               <button onClick={triggerReport} className="hidden md:block px-3 py-1.5 text-xs font-bold rounded bg-red-900/50 text-red-400 border border-red-800 hover:bg-red-800 hover:text-white transition-colors">
                   Report
               </button>
-          )}
+          )} */}
 
           <button
             onClick={handleNextBtn}

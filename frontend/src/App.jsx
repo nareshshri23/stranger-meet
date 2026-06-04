@@ -2,17 +2,19 @@ import React, { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { auth, logInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-// WE IMPORTED OUR NEW ICONS HERE
 import { Mic, MicOff, Video, VideoOff, LogOut, User } from 'lucide-react'; 
 
-const SOKET_URL = 'https://stranger-meet-api.onrender.com' // Your live backend URL
+const SOKET_URL = 'https://stranger-meet-api.onrender.com' 
 
 export default function App() {
   const [user, setUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [am_i_banned, set_am_i_banned] = useState(false)
 
+  // ADDED: The missing safety variable is right here!
   const [sock, setSock] = useState(null)
+  const [isSocketConnected, setIsSocketConnected] = useState(false)
+  
   const [currState, setCurrState] = useState('idle') 
   const [msgs, setMsgs] = useState([])
   const [txt, setTxt] = useState('')
@@ -41,6 +43,10 @@ export default function App() {
         auth: { token: user.uid }
     })
     setSock(s)
+
+    // ADDED: These lines tell the app when Render is fully awake
+    s.on('connect', () => setIsSocketConnected(true))
+    s.on('disconnect', () => setIsSocketConnected(false))
 
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then((streamData) => {
@@ -268,24 +274,27 @@ export default function App() {
       <header className="p-3 md:p-4 bg-neutral-900 border-b border-neutral-800 flex justify-between items-center shrink-0">
         <h1 className="text-base md:text-xl font-bold text-blue-500 tracking-wide truncate mr-2">STRANGER_MEET</h1>
         
-        <div className="flex items-center gap-2 md:gap-4">
-          <div className="hidden md:flex items-center gap-3 mr-2">
-              <img src={user.photoURL} alt="avatar" className="w-8 h-8 rounded-full border border-neutral-700" />
-              {/* REPLACED PLAIN TEXT WITH A CLEAN LOGOUT ICON */}
-              <button onClick={logOut} className="text-neutral-400 hover:text-red-400 transition-colors p-1" title="Log Out">
-                  <LogOut className="w-4 h-4 md:w-5 md:h-5" />
+        <div className="flex items-center gap-3 md:gap-4">
+          <div className="flex items-center gap-2 md:gap-3">
+              <img src={user.photoURL} alt="avatar" className="hidden md:block w-8 h-8 rounded-full border border-neutral-700" />
+              <button onClick={logOut} className="text-neutral-400 hover:text-red-400 transition-colors p-2 md:p-1" title="Log Out">
+                  <LogOut className="w-5 h-5 md:w-5 md:h-5" />
               </button>
           </div>
 
+          {/* ADDED: The smart safety button is restored here! */}
           <button
             onClick={handleNextBtn}
+            disabled={!isSocketConnected}
             className={`px-3 md:px-5 py-1.5 text-sm md:text-base font-semibold rounded transition-colors whitespace-nowrap ${
-              currState === 'connected' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
+              !isSocketConnected ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed border border-neutral-700' :
+              currState === 'connected' ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
             }`}
           >
-            {currState === 'idle' && 'Start Chat'}
-            {currState === 'searching' && 'Skip'}
-            {currState === 'connected' && 'Next Stranger'}
+            {!isSocketConnected && 'Connecting...'}
+            {isSocketConnected && currState === 'idle' && 'Start Chat'}
+            {isSocketConnected && currState === 'searching' && 'Skip'}
+            {isSocketConnected && currState === 'connected' && 'Next Stranger'}
           </button>
         </div>
       </header>
@@ -321,7 +330,6 @@ export default function App() {
 
             {!isCamOn && (
                 <div className="absolute inset-0 flex items-center justify-center bg-neutral-800">
-                    {/* REPLACED THE OLD SVG WITH THE LUCIDE USER ICON */}
                     <User className="w-12 h-12 md:w-24 md:h-24 text-neutral-600" />
                 </div>
             )}
@@ -329,7 +337,6 @@ export default function App() {
             <div className="absolute bottom-1 left-1 md:bottom-2 md:left-2 bg-black/60 px-1.5 py-0.5 rounded text-[10px] md:text-xs z-10">You</div>
             
             <div className="absolute top-1 right-1 md:top-2 md:right-2 flex flex-col md:flex-row gap-1 md:gap-2 z-10">
-                {/* REPLACED EMOJIS WITH DYNAMIC LUCIDE ICONS */}
                 <button onClick={toggleMic} className="bg-neutral-900/80 hover:bg-neutral-800 p-1.5 md:p-2 rounded border border-neutral-700 transition-colors" title="Toggle Mic">
                     {isMicOn ? <Mic className="w-4 h-4 md:w-5 md:h-5 text-white" /> : <MicOff className="w-4 h-4 md:w-5 md:h-5 text-red-500" />}
                 </button>

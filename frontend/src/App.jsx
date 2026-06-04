@@ -11,10 +11,8 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [am_i_banned, set_am_i_banned] = useState(false)
 
-  // ADDED: The missing safety variable is right here!
   const [sock, setSock] = useState(null)
   const [isSocketConnected, setIsSocketConnected] = useState(false)
-  
   const [currState, setCurrState] = useState('idle') 
   const [msgs, setMsgs] = useState([])
   const [txt, setTxt] = useState('')
@@ -25,8 +23,12 @@ export default function App() {
   const myVid = useRef(null)
   const otherVid = useRef(null)
   const myStream = useRef(null)
+  
   let rtc_conn = useRef(null) 
   let dc_ref = useRef(null)
+  
+  // Queue to hold ICE candidates that arrive before the SDP offer to prevent race conditions
+  let ice_queue = useRef([]) 
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -44,7 +46,6 @@ export default function App() {
     })
     setSock(s)
 
-    // ADDED: These lines tell the app when Render is fully awake
     s.on('connect', () => setIsSocketConnected(true))
     s.on('disconnect', () => setIsSocketConnected(false))
 
@@ -76,6 +77,13 @@ export default function App() {
       try {
           if (data.sdp) {
               await rtc_conn.current.setRemoteDescription(new RTCSessionDescription(data.sdp))
+              
+              // Flush waiting queue and process any early ICE candidates
+              while (ice_queue.current.length > 0) {
+                  let cand = ice_queue.current.shift()
+                  await rtc_conn.current.addIceCandidate(new RTCIceCandidate(cand))
+              }
+
               if (data.sdp.type === 'offer') {
                   let ans = await rtc_conn.current.createAnswer()
                   await rtc_conn.current.setLocalDescription(ans)
@@ -83,9 +91,16 @@ export default function App() {
               }
           }
           if (data.iceCandidate) {
-              await rtc_conn.current.addIceCandidate(new RTCIceCandidate(data.iceCandidate))
+              if (rtc_conn.current.remoteDescription) {
+                  await rtc_conn.current.addIceCandidate(new RTCIceCandidate(data.iceCandidate))
+              } else {
+                  // SDP not ready; queue the candidate
+                  ice_queue.current.push(data.iceCandidate)
+              }
           }
-      } catch (err) { }
+      } catch (err) { 
+          console.error("Signaling error:", err)
+      }
     })
 
     s.on('partner_disconnected', (d) => {
@@ -97,6 +112,7 @@ export default function App() {
           rtc_conn.current = null
       }
       dc_ref.current = null
+      ice_queue.current = [] 
     })
 
     s.on('you_got_banned', (d) => {
@@ -119,6 +135,7 @@ export default function App() {
 
   const makeWebRTC = async (isInitiator, socketInstance) => {
       if (rtc_conn.current) rtc_conn.current.close()
+      ice_queue.current = [] 
 
       let config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
       const pc = new RTCPeerConnection(config)
@@ -167,6 +184,7 @@ export default function App() {
           rtc_conn.current = null
       }
       dc_ref.current = null
+      ice_queue.current = []
       sock.emit('find_partner')
     }
   }
@@ -192,14 +210,17 @@ export default function App() {
   }
 
   const toggleCam = async () => {
+      // User-agent sniffing to determine optimal hardware control
       let is_phn = /Mobi|Android/i.test(navigator.userAgent)
 
       if (isCamOn) {
           let trk = myStream.current.getVideoTracks()[0]
           if (trk) {
               if (is_phn) {
+                  // Mobile relies on OS-level privacy indicators; software mute prevents crashes
                   trk.enabled = false
               } else {
+                  // Desktop requires hardware mute to disable the physical camera light
                   trk.stop()
               }
           }
@@ -282,7 +303,6 @@ export default function App() {
               </button>
           </div>
 
-          {/* ADDED: The smart safety button is restored here! */}
           <button
             onClick={handleNextBtn}
             disabled={!isSocketConnected}

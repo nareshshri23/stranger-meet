@@ -152,7 +152,9 @@ export default function App() {
 
   const handleNextBtn = () => {
     if (sock) {
-      setMsgs([])
+      setCurrState('searching') 
+      setMsgs([{ sender: 'system', text: 'Connecting to matchmaking queue...' }])
+      
       if (otherVid.current) otherVid.current.srcObject = null
       if (rtc_conn.current) {
           rtc_conn.current.close()

@@ -195,12 +195,48 @@ export default function App() {
       }
   }
 
-  const toggleCam = () => {
-      if (myStream.current) {
-          let track = myStream.current.getVideoTracks()[0]
-          if (track) {
-              track.enabled = !track.enabled
-              setIsCamOn(track.enabled)
+  const toggleCam = async () => {
+      let is_phn = /Mobi|Android/i.test(navigator.userAgent)
+
+      if (isCamOn) {
+          let trk = myStream.current.getVideoTracks()[0]
+          if (trk) {
+              if (is_phn) {
+                  trk.enabled = false
+              } else {
+                  trk.stop()
+              }
+          }
+          setIsCamOn(false)
+      } else {
+          if (is_phn) {
+              let curr_trk = myStream.current.getVideoTracks()[0]
+              if (curr_trk) curr_trk.enabled = true
+              setIsCamOn(true)
+          } else {
+              try {
+                  let fresh_vid = await navigator.mediaDevices.getUserMedia({ video: true })
+                  let n_trk = fresh_vid.getVideoTracks()[0]
+                  
+                  let prev_t = myStream.current.getVideoTracks()[0]
+                  if (prev_t) myStream.current.removeTrack(prev_t)
+                  myStream.current.addTrack(n_trk)
+                  
+                  if (myVid.current) {
+                      myVid.current.srcObject = myStream.current
+                  }
+                  
+                  if (rtc_conn.current) {
+                      let vsndr = rtc_conn.current.getSenders().find(s => s.track && s.track.kind === 'video')
+                      if (vsndr) {
+                          vsndr.replaceTrack(n_trk)
+                      }
+                  }
+                  setIsCamOn(true)
+              } catch (err) {
+                  console.log(err)
+                  alert("cam blocked")
+              }
           }
       }
   }
@@ -293,11 +329,29 @@ export default function App() {
           </div>
 
           {/* Your Video (Floating PiP on mobile, 50% on desktop) */}
-          <div className="absolute bottom-4 right-4 w-24 h-36 md:static md:w-1/2 md:h-full z-30 bg-black rounded-lg overflow-hidden border border-neutral-600 md:border-neutral-800 shadow-2xl md:shadow-none flex items-center justify-center">
-            <video ref={myVid} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
-            <div className="absolute bottom-1 left-1 md:bottom-2 md:left-2 bg-black/60 px-1.5 py-0.5 rounded text-[10px] md:text-xs">You</div>
+          <div className="absolute bottom-4 right-4 w-24 h-36 md:relative md:w-1/2 md:h-full z-30 bg-neutral-800 rounded-lg overflow-hidden border border-neutral-600 md:border-neutral-800 shadow-2xl md:shadow-none flex items-center justify-center">
             
-            <div className="absolute top-1 right-1 md:top-2 md:right-2 flex flex-col md:flex-row gap-1 md:gap-2">
+            {/* The Actual Video */}
+            <video 
+                ref={myVid} 
+                autoPlay 
+                playsInline 
+                muted 
+                className={`w-full h-full object-cover transform -scale-x-100 ${!isCamOn ? 'hidden' : ''}`} 
+            />
+
+            {/* The Avatar Fallback */}
+            {!isCamOn && (
+                <div className="absolute inset-0 flex items-center justify-center bg-neutral-800">
+                    <svg className="w-12 h-12 md:w-24 md:h-24 text-neutral-600" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                    </svg>
+                </div>
+            )}
+
+            <div className="absolute bottom-1 left-1 md:bottom-2 md:left-2 bg-black/60 px-1.5 py-0.5 rounded text-[10px] md:text-xs z-10">You</div>
+            
+            <div className="absolute top-1 right-1 md:top-2 md:right-2 flex flex-col md:flex-row gap-1 md:gap-2 z-10">
                 <button onClick={toggleMic} className="bg-neutral-800/80 hover:bg-neutral-700 p-1 md:px-2 md:py-1 rounded text-xs border border-neutral-700 transition-colors" title="Toggle Mic">
                     {isMicOn ? '🎙️' : '🔇'}
                 </button>
@@ -309,8 +363,8 @@ export default function App() {
         </div>
 
         {/* CHAT AREA */}
-        <div className="flex-1 w-full md:w-96 flex flex-col border-t md:border-t-0 md:border-l border-neutral-800 bg-neutral-950 overflow-hidden min-h-[200px]">
-          <div className="flex-1 p-3 overflow-y-auto space-y-2 text-sm">
+        <div className="flex-1 md:flex-none w-full md:w-80 lg:w-96 flex flex-col border-t md:border-t-0 md:border-l border-neutral-800 bg-neutral-950 overflow-hidden min-h-[200px]">
+        <div className="flex-1 p-3 overflow-y-auto space-y-2 text-sm">
             {msgs.map((msg, i) => (
               <div key={i} className={`p-2 rounded max-w-[85%] ${
                 msg.sender === 'system' ? 'bg-neutral-900 text-neutral-400 mx-auto text-center text-xs w-full' :

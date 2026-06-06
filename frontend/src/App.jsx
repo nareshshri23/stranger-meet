@@ -135,7 +135,11 @@ export default function App() {
           iceServers: [
               { urls: 'stun:stun.l.google.com:19302' },
               { 
-                  urls: 'turn:free.expressturn.com:3478', // Updated URL
+                  // Providing both UDP and TCP guarantees a fallback if the carrier blocks UDP
+                  urls: [
+                      'turn:free.expressturn.com:3478?transport=udp',
+                      'turn:free.expressturn.com:3478?transport=tcp'
+                  ], 
                   username: import.meta.env.VITE_TURN_USERNAME,        
                   credential: import.meta.env.VITE_TURN_PASSWORD       
               }

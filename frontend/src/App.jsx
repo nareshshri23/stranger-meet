@@ -2,400 +2,327 @@ import React, { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { auth, logInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { Mic, MicOff, Video, VideoOff, LogOut, User } from 'lucide-react'; 
+import { Mic, MicOff, Video, VideoOff, LogOut, User } from 'lucide-react';
 
-const SOKET_URL = 'https://stranger-meet-api.onrender.com' 
+const SOKET_URL = 'https://stranger-meet-api.onrender.com'
 
 export default function App() {
-  const [user, setUser] = useState(null)
-  const [authLoading, setAuthLoading] = useState(true)
-  const [am_i_banned, set_am_i_banned] = useState(false)
+  const [u, setU] = useState(null)
+  const [loadingAuth, setLoadingAuth] = useState(true)
+  const [bannedFlg, setBannedFlg] = useState(false)
 
-  const [sock, setSock] = useState(null)
-  const [isSocketConnected, setIsSocketConnected] = useState(false)
-  const [currState, setCurrState] = useState('idle') 
-  const [msgs, setMsgs] = useState([])
-  const [txt, setTxt] = useState('')
-  
-  const [isMicOn, setIsMicOn] = useState(true)
-  const [isCamOn, setIsCamOn] = useState(true)
+  const [sockt, setSockt] = useState(null)
+  const [socketReady, setSocketReady] = useState(false)
+  const [matchStatus, setMatchStatus] = useState('idle') 
+  const [chatLog, setChatLog] = useState([])
+  const [msgInput, setMsgInput] = useState('')
 
-  const myVid = useRef(null)
-  const otherVid = useRef(null)
-  const myStream = useRef(null)
-  
-  let rtc_conn = useRef(null) 
-  let dc_ref = useRef(null)
-  
-  // Queue to hold ICE candidates that arrive before the SDP offer to prevent race conditions
-  let ice_queue = useRef([]) 
+  const [camActive, setCamActive] = useState(true)
+  const [micActive, setMicActive] = useState(true)
+
+  const selfVidRef = useRef(null)
+  const remoteVidRef = useRef(null)
+  const localStreamObj = useRef(null)
+
+  let pcRef = useRef(null)
+  let dataChanRef = useRef(null)
+  let waitQueue = useRef([]) 
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-        setUser(currentUser)
-        setAuthLoading(false)
+    const unsub = onAuthStateChanged(auth, (usr) => {
+        setU(usr)
+        setLoadingAuth(false)
     });
-    return () => unsubscribe();
+    return () => unsub();
   }, [])
 
   useEffect(() => {
-    if (!user) return;
+    if (!u) return;
 
-    let s = io(SOKET_URL, {
-        auth: { token: user.uid }
-    })
-    setSock(s)
+    let s_conn = io(SOKET_URL, { auth: { token: u.uid } })
+    setSockt(s_conn)
 
-    s.on('connect', () => setIsSocketConnected(true))
-    s.on('disconnect', () => setIsSocketConnected(false))
+    s_conn.on('connect', () => { setSocketReady(true) })
+    s_conn.on('disconnect', () => { setSocketReady(false) })
+    
+    s_conn.on('connect_error', (err) => {
+        console.error("rejected by srvr:", err.message);
+        setBannedFlg(true);
+        setSocketReady(false);
+    });
 
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then((streamData) => {
-        myStream.current = streamData
-        if (myVid.current) {
-          myVid.current.srcObject = streamData
-        }
+      .then((s) => {
+        localStreamObj.current = s
+        if (selfVidRef.current) selfVidRef.current.srcObject = s
       })
-      .catch((e) => {
-        console.error("camera err:", e)
-        alert("Camera required for this app.")
+      .catch((err) => {
+        console.log("cam fail", err)
+        alert("Plz allow camera")
       })
 
-    s.on('waiting', (d) => {
-      setCurrState('searching')
-      setMsgs([{ sender: 'system', text: d.message }])
+    s_conn.on('waiting', (data) => {
+      setMatchStatus('searching')
+      setChatLog([{ sender: 'sys', text: data.message }])
     })
 
-    s.on('matched', async (d) => {
-      setCurrState('connected')
-      setMsgs((old) => [...old, { sender: 'system', text: 'Connected to a stranger. Say hi!' }])
-      makeWebRTC(d.createOffer, s)
+    s_conn.on('matched', async (data) => {
+      setMatchStatus('connected')
+      setChatLog((prev) => [...prev, { sender: 'sys', text: 'Connected! Say hi' }])
+      initWebRTC(data.createOffer, s_conn)
     })
 
-    s.on('receive_signal', async (data) => {
-      if (!rtc_conn.current) return 
+    s_conn.on('receive_signal', async (info) => {
+      if (!pcRef.current) return
       try {
-          if (data.sdp) {
-              await rtc_conn.current.setRemoteDescription(new RTCSessionDescription(data.sdp))
+          if (info.sdp) {
+              await pcRef.current.setRemoteDescription(new RTCSessionDescription(info.sdp))
               
-              // Flush waiting queue and process any early ICE candidates
-              while (ice_queue.current.length > 0) {
-                  let cand = ice_queue.current.shift()
-                  await rtc_conn.current.addIceCandidate(new RTCIceCandidate(cand))
+              while (waitQueue.current.length > 0) {
+                  let tempCand = waitQueue.current.shift()
+                  await pcRef.current.addIceCandidate(new RTCIceCandidate(tempCand))
               }
 
-              if (data.sdp.type === 'offer') {
-                  let ans = await rtc_conn.current.createAnswer()
-                  await rtc_conn.current.setLocalDescription(ans)
-                  s.emit('send_signal', { sdp: rtc_conn.current.localDescription })
+              if (info.sdp.type === 'offer') {
+                  let reply = await pcRef.current.createAnswer()
+                  await pcRef.current.setLocalDescription(reply)
+                  s_conn.emit('send_signal', { sdp: pcRef.current.localDescription })
               }
           }
-          if (data.iceCandidate) {
-              if (rtc_conn.current.remoteDescription) {
-                  await rtc_conn.current.addIceCandidate(new RTCIceCandidate(data.iceCandidate))
+          if (info.iceCandidate) {
+              if (pcRef.current.remoteDescription) {
+                  await pcRef.current.addIceCandidate(new RTCIceCandidate(info.iceCandidate))
               } else {
-                  // SDP not ready; queue the candidate
-                  ice_queue.current.push(data.iceCandidate)
+                  waitQueue.current.push(info.iceCandidate) 
               }
           }
-      } catch (err) { 
-          console.error("Signaling error:", err)
+      } catch (e) {
+          console.log("sig err", e)
       }
     })
 
-    s.on('partner_disconnected', (d) => {
-      setCurrState('idle')
-      setMsgs((old) => [...old, { sender: 'system', text: d.message }])
-      if (otherVid.current) otherVid.current.srcObject = null
-      if (rtc_conn.current) {
-          rtc_conn.current.close()
-          rtc_conn.current = null
+    s_conn.on('partner_disconnected', (info) => {
+      setMatchStatus('idle')
+      setChatLog((prev) => [...prev, { sender: 'sys', text: info.message }])
+      if (remoteVidRef.current) remoteVidRef.current.srcObject = null
+      if (pcRef.current) {
+          pcRef.current.close()
+          pcRef.current = null
       }
-      dc_ref.current = null
-      ice_queue.current = [] 
+      dataChanRef.current = null
+      waitQueue.current = []
     })
 
-    s.on('you_got_banned', (d) => {
-        set_am_i_banned(true)
-        if (myStream.current) {
-            myStream.current.getTracks().forEach(t => t.stop())
-        }
+    s_conn.on('you_got_banned', () => {
+        setBannedFlg(true)
+        if (localStreamObj.current) localStreamObj.current.getTracks().forEach(t => t.stop())
     })
 
-    return () => {
-      s.disconnect()
-    }
-  }, [user])
+    return () => { s_conn.disconnect() }
+  }, [u])
 
-  const hook_up_data_pipe = (pipe) => {
-      pipe.onmessage = (event) => {
-          setMsgs((old) => [...old, { sender: 'stranger', text: event.data }])
+  const attachDataEvents = (chan) => {
+      chan.onmessage = (evt) => {
+          setChatLog((prev) => [...prev, { sender: 'stranger', text: evt.data }])
       }
   }
 
-  const makeWebRTC = async (isInitiator, socketInstance) => {
-      if (rtc_conn.current) rtc_conn.current.close()
-      ice_queue.current = [] 
+  const initWebRTC = async (isCaller, sockInstance) => {
+      if (pcRef.current) pcRef.current.close()
+      waitQueue.current = []
 
-      let config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
-      const pc = new RTCPeerConnection(config)
-      rtc_conn.current = pc
+      let rtcConfig = {
+          iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { 
+                  urls: 'turn:free.expressturn.com:3478', // Updated URL
+                  username: import.meta.env.VITE_TURN_USERNAME,        
+                  credential: import.meta.env.VITE_TURN_PASSWORD       
+              }
+          ]
+      }
 
-      if (isInitiator) {
-          let p = pc.createDataChannel('chat_pipe')
-          dc_ref.current = p
-          hook_up_data_pipe(p)
+      const peerCnn = new RTCPeerConnection(rtcConfig)
+      pcRef.current = peerCnn
+
+      if (isCaller) {
+          let dChan = peerCnn.createDataChannel('chat')
+          dataChanRef.current = dChan
+          attachDataEvents(dChan)
       } else {
-          pc.ondatachannel = (event) => {
-              dc_ref.current = event.channel
-              hook_up_data_pipe(event.channel)
+          peerCnn.ondatachannel = (evt) => {
+              dataChanRef.current = evt.channel
+              attachDataEvents(evt.channel)
           }
       }
 
-      pc.onicecandidate = (e) => {
-          if (e.candidate) socketInstance.emit('send_signal', { iceCandidate: e.candidate })
+      peerCnn.onicecandidate = (evt) => {
+          if (evt.candidate) sockInstance.emit('send_signal', { iceCandidate: evt.candidate })
       }
 
-      pc.ontrack = (e) => {
-          if (otherVid.current) otherVid.current.srcObject = e.streams[0]
+      peerCnn.ontrack = (evt) => {
+          if (remoteVidRef.current) remoteVidRef.current.srcObject = evt.streams[0]
       }
 
-      if (myStream.current) {
-          myStream.current.getTracks().forEach(t => pc.addTrack(t, myStream.current))
+      if (localStreamObj.current) {
+          localStreamObj.current.getTracks().forEach(trk => peerCnn.addTrack(trk, localStreamObj.current))
       }
 
-      if (isInitiator) {
+      if (isCaller) {
           try {
-              let sdp = await pc.createOffer()
-              await pc.setLocalDescription(sdp)
-              socketInstance.emit('send_signal', { sdp: pc.localDescription })
-          } catch (e) { }
+              let offerSdp = await peerCnn.createOffer()
+              await peerCnn.setLocalDescription(offerSdp)
+              sockInstance.emit('send_signal', { sdp: peerCnn.localDescription })
+          } catch (err) { console.log(err) }
       }
   }
 
-  const handleNextBtn = () => {
-    if (sock) {
-      setCurrState('searching') 
-      setMsgs([{ sender: 'system', text: 'Connecting to matchmaking queue...' }])
+  const clickNext = () => {
+    if (sockt) {
+      setMatchStatus('searching')
+      setChatLog([{ sender: 'sys', text: 'Finding match...' }])
       
-      if (otherVid.current) otherVid.current.srcObject = null
-      if (rtc_conn.current) {
-          rtc_conn.current.close()
-          rtc_conn.current = null
+      if (remoteVidRef.current) remoteVidRef.current.srcObject = null
+      if (pcRef.current) {
+          pcRef.current.close()
+          pcRef.current = null
       }
-      dc_ref.current = null
-      ice_queue.current = []
-      sock.emit('find_partner')
+      dataChanRef.current = null
+      waitQueue.current = []
+
+      sockt.emit('find_partner')
     }
   }
 
-  const sendMsg = (e) => {
-    e.preventDefault()
-    if (!txt.trim()) return
-    if (dc_ref.current && dc_ref.current.readyState === 'open') {
-        dc_ref.current.send(txt)
+  const handleSend = (evt) => {
+    evt.preventDefault()
+    if (!msgInput.trim()) return
+    if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
+        dataChanRef.current.send(msgInput)
     }
-    setMsgs((old) => [...old, { sender: 'you', text: txt }])
-    setTxt('')
+    setChatLog((prev) => [...prev, { sender: 'you', text: msgInput }])
+    setMsgInput('')
   }
 
-  const toggleMic = () => {
-      if (myStream.current) {
-          let track = myStream.current.getAudioTracks()[0]
-          if (track) {
-              track.enabled = !track.enabled
-              setIsMicOn(track.enabled)
+  const switchMic = () => {
+      if (localStreamObj.current) {
+          let aTrack = localStreamObj.current.getAudioTracks()[0]
+          if (aTrack) {
+              aTrack.enabled = !aTrack.enabled
+              setMicActive(aTrack.enabled)
           }
       }
   }
 
-  const toggleCam = async () => {
-      // User-agent sniffing to determine optimal hardware control
-      let is_phn = /Mobi|Android/i.test(navigator.userAgent)
+  const switchCam = async () => {
+      let isMobileDev = /Mobi|Android/i.test(navigator.userAgent)
 
-      if (isCamOn) {
-          let trk = myStream.current.getVideoTracks()[0]
-          if (trk) {
-              if (is_phn) {
-                  // Mobile relies on OS-level privacy indicators; software mute prevents crashes
-                  trk.enabled = false
-              } else {
-                  // Desktop requires hardware mute to disable the physical camera light
-                  trk.stop()
-              }
+      if (camActive) {
+          let vTrack = localStreamObj.current.getVideoTracks()[0]
+          if (vTrack) {
+              if (isMobileDev) vTrack.enabled = false
+              else vTrack.stop()
           }
-          setIsCamOn(false)
+          setCamActive(false)
       } else {
-          if (is_phn) {
-              let curr_trk = myStream.current.getVideoTracks()[0]
-              if (curr_trk) curr_trk.enabled = true
-              setIsCamOn(true)
+          if (isMobileDev) {
+              let vTrack = localStreamObj.current.getVideoTracks()[0]
+              if (vTrack) vTrack.enabled = true
+              setCamActive(true)
           } else {
               try {
-                  let fresh_vid = await navigator.mediaDevices.getUserMedia({ video: true })
-                  let n_trk = fresh_vid.getVideoTracks()[0]
+                  let newStream = await navigator.mediaDevices.getUserMedia({ video: true })
+                  let newVTrack = newStream.getVideoTracks()[0]
                   
-                  let prev_t = myStream.current.getVideoTracks()[0]
-                  if (prev_t) myStream.current.removeTrack(prev_t)
-                  myStream.current.addTrack(n_trk)
+                  let oldTrack = localStreamObj.current.getVideoTracks()[0]
+                  if (oldTrack) localStreamObj.current.removeTrack(oldTrack)
                   
-                  if (myVid.current) {
-                      myVid.current.srcObject = myStream.current
+                  localStreamObj.current.addTrack(newVTrack)
+                  if (selfVidRef.current) selfVidRef.current.srcObject = localStreamObj.current
+                  
+                  if (pcRef.current) {
+                      let sender = pcRef.current.getSenders().find(s => s.track && s.track.kind === 'video')
+                      if (sender) sender.replaceTrack(newVTrack)
                   }
-                  
-                  if (rtc_conn.current) {
-                      let vsndr = rtc_conn.current.getSenders().find(s => s.track && s.track.kind === 'video')
-                      if (vsndr) {
-                          vsndr.replaceTrack(n_trk)
-                      }
-                  }
-                  setIsCamOn(true)
-              } catch (err) {
-                  console.log(err)
+                  setCamActive(true)
+              } catch (e) {
+                  console.log("blocked", e)
                   alert("cam blocked")
               }
           }
       }
   }
 
-  if (authLoading) {
-      return <div className="h-[100dvh] bg-neutral-950 flex items-center justify-center text-neutral-500">Loading App...</div>
-  }
+  if (loadingAuth) return <div className="h-[100dvh] bg-neutral-950 flex items-center justify-center text-neutral-500">Loading...</div>
+  
+  if (bannedFlg) return (
+      <div className="h-[100dvh] bg-neutral-950 flex flex-col items-center justify-center text-white p-4 text-center">
+          <h1 className="text-4xl font-bold text-red-500 mb-4">BANNED</h1>
+          <p className="text-neutral-400">Your Google Account has been blocked.</p>
+      </div>
+  )
 
-  if (am_i_banned) {
-      return (
-          <div className="h-[100dvh] bg-neutral-950 flex flex-col items-center justify-center text-white p-4 text-center">
-              <h1 className="text-4xl font-bold text-red-500 mb-4">ACCESS DENIED</h1>
-              <p className="text-neutral-400 max-w-md">Your Google Account has been permanently banned from this platform.</p>
+  if (!u) return (
+      <div className="h-[100dvh] bg-neutral-950 flex flex-col items-center justify-center text-white p-4">
+          <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-lg max-w-md w-full text-center shadow-2xl">
+              <h1 className="text-2xl font-bold text-blue-500 mb-4">STRANGER_MEET</h1>
+              <button onClick={logInWithGoogle} className="w-full flex items-center justify-center gap-3 px-6 py-3 rounded bg-white text-black font-semibold">
+                  Login with Google
+              </button>
           </div>
-      )
-  }
-
-  if (!user) {
-      return (
-          <div className="h-[100dvh] bg-neutral-950 flex flex-col items-center justify-center text-white p-4">
-              <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-lg max-w-md w-full text-center shadow-2xl">
-                  <h1 className="text-2xl font-bold text-blue-500 mb-4">STRANGER_MEET</h1>
-                  <h2 className="text-lg font-semibold mb-4 text-neutral-300">Accountability Required</h2>
-                  <p className="text-neutral-400 text-sm mb-8 leading-relaxed">
-                      To ensure a safe environment, anonymous access is strictly prohibited. You must authenticate with a verified Google account.
-                  </p>
-                  <button onClick={logInWithGoogle} className="w-full flex items-center justify-center gap-3 px-6 py-3 rounded bg-white hover:bg-neutral-200 text-black font-semibold transition-colors">
-                      <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
-                      Sign in with Google
-                  </button>
-              </div>
-          </div>
-      )
-  }
+      </div>
+  )
 
   return (
     <div className="flex flex-col h-[100dvh] max-h-[100dvh] bg-neutral-950 text-white overflow-hidden">
-      
       <header className="p-3 md:p-4 bg-neutral-900 border-b border-neutral-800 flex justify-between items-center shrink-0">
-        <h1 className="text-base md:text-xl font-bold text-blue-500 tracking-wide truncate mr-2">STRANGER_MEET</h1>
-        
+        <h1 className="text-base md:text-xl font-bold text-blue-500">STRANGER_MEET</h1>
         <div className="flex items-center gap-3 md:gap-4">
           <div className="flex items-center gap-2 md:gap-3">
-              <img src={user.photoURL} alt="avatar" className="hidden md:block w-8 h-8 rounded-full border border-neutral-700" />
-              <button onClick={logOut} className="text-neutral-400 hover:text-red-400 transition-colors p-2 md:p-1" title="Log Out">
-                  <LogOut className="w-5 h-5 md:w-5 md:h-5" />
-              </button>
+              <img src={u.photoURL} alt="pfp" className="hidden md:block w-8 h-8 rounded-full border border-neutral-700" />
+              <button onClick={logOut} className="text-neutral-400 hover:text-red-400 p-2 md:p-1"><LogOut className="w-5 h-5" /></button>
           </div>
-
           <button
-            onClick={handleNextBtn}
-            disabled={!isSocketConnected}
-            className={`px-3 md:px-5 py-1.5 text-sm md:text-base font-semibold rounded transition-colors whitespace-nowrap ${
-              !isSocketConnected ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed border border-neutral-700' :
-              currState === 'connected' ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
-            }`}
+            onClick={clickNext}
+            disabled={!socketReady}
+            className={`px-3 md:px-5 py-1.5 text-sm md:text-base font-semibold rounded ${!socketReady ? 'bg-neutral-800 text-neutral-500' : matchStatus === 'connected' ? 'bg-amber-600' : 'bg-blue-600'}`}
           >
-            {!isSocketConnected && 'Connecting...'}
-            {isSocketConnected && currState === 'idle' && 'Start Chat'}
-            {isSocketConnected && currState === 'searching' && 'Skip'}
-            {isSocketConnected && currState === 'connected' && 'Next Stranger'}
+            {!socketReady && 'Connecting...'}
+            {socketReady && matchStatus === 'idle' && 'Start'}
+            {socketReady && matchStatus === 'searching' && 'Skip'}
+            {socketReady && matchStatus === 'connected' && 'Next'}
           </button>
         </div>
       </header>
 
       <main className="flex-1 flex flex-col md:flex-row overflow-hidden">
-        
-        <div className="relative w-full h-[40vh] min-h-[250px] md:h-auto md:flex-1 flex md:flex-row gap-2 p-2 bg-neutral-900 shrink-0">
-          
+        <div className="relative w-full h-[40vh] md:h-auto md:flex-1 flex md:flex-row gap-2 p-2 bg-neutral-900 shrink-0">
           <div className="w-full h-full md:w-1/2 bg-black rounded-lg overflow-hidden border border-neutral-800 relative flex items-center justify-center">
-            <video ref={otherVid} autoPlay playsInline className="w-full h-full object-cover" />
+            <video ref={remoteVidRef} autoPlay playsInline className="w-full h-full object-cover" />
             <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-0.5 rounded text-xs z-20">Stranger</div>
-            {currState === 'searching' && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/80 text-sm animate-pulse text-neutral-400 z-10 text-center px-4">
-                Finding a stranger online...
-              </div>
-            )}
-            {currState === 'idle' && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/80 text-sm text-neutral-500 z-10 text-center px-4">
-                Click "Start Chat" to begin.
-              </div>
-            )}
           </div>
-
-          <div className="absolute bottom-4 right-4 w-24 h-36 md:relative md:w-1/2 md:h-full z-30 bg-neutral-800 rounded-lg overflow-hidden border border-neutral-600 md:border-neutral-800 shadow-2xl md:shadow-none flex items-center justify-center">
-            
-            <video 
-                ref={myVid} 
-                autoPlay 
-                playsInline 
-                muted 
-                className={`w-full h-full object-cover transform -scale-x-100 ${!isCamOn ? 'hidden' : ''}`} 
-            />
-
-            {!isCamOn && (
-                <div className="absolute inset-0 flex items-center justify-center bg-neutral-800">
-                    <User className="w-12 h-12 md:w-24 md:h-24 text-neutral-600" />
-                </div>
-            )}
-
-            <div className="absolute bottom-1 left-1 md:bottom-2 md:left-2 bg-black/60 px-1.5 py-0.5 rounded text-[10px] md:text-xs z-10">You</div>
-            
-            <div className="absolute top-1 right-1 md:top-2 md:right-2 flex flex-col md:flex-row gap-1 md:gap-2 z-10">
-                <button onClick={toggleMic} className="bg-neutral-900/80 hover:bg-neutral-800 p-1.5 md:p-2 rounded border border-neutral-700 transition-colors" title="Toggle Mic">
-                    {isMicOn ? <Mic className="w-4 h-4 md:w-5 md:h-5 text-white" /> : <MicOff className="w-4 h-4 md:w-5 md:h-5 text-red-500" />}
-                </button>
-                <button onClick={toggleCam} className="bg-neutral-900/80 hover:bg-neutral-800 p-1.5 md:p-2 rounded border border-neutral-700 transition-colors" title="Toggle Camera">
-                    {isCamOn ? <Video className="w-4 h-4 md:w-5 md:h-5 text-white" /> : <VideoOff className="w-4 h-4 md:w-5 md:h-5 text-red-500" />}
-                </button>
+          <div className="absolute bottom-4 right-4 w-24 h-36 md:relative md:w-1/2 md:h-full z-30 bg-neutral-800 rounded-lg overflow-hidden border border-neutral-600 shadow-2xl md:shadow-none flex items-center justify-center">
+            <video ref={selfVidRef} autoPlay playsInline muted className={`w-full h-full object-cover transform -scale-x-100 ${!camActive ? 'hidden' : ''}`} />
+            {!camActive && <div className="absolute inset-0 flex items-center justify-center bg-neutral-800"><User className="w-12 h-12 md:w-24 md:h-24 text-neutral-600" /></div>}
+            <div className="absolute top-1 right-1 flex flex-col md:flex-row gap-1 z-10">
+                <button onClick={switchMic} className="bg-neutral-900/80 p-1.5 rounded">{micActive ? <Mic className="w-4 h-4 text-white" /> : <MicOff className="w-4 h-4 text-red-500" />}</button>
+                <button onClick={switchCam} className="bg-neutral-900/80 p-1.5 rounded">{camActive ? <Video className="w-4 h-4 text-white" /> : <VideoOff className="w-4 h-4 text-red-500" />}</button>
             </div>
           </div>
         </div>
 
-        <div className="flex-1 md:flex-none w-full md:w-80 lg:w-96 flex flex-col border-t md:border-t-0 md:border-l border-neutral-800 bg-neutral-950 overflow-hidden min-h-[200px]">
+        <div className="flex-1 md:flex-none w-full md:w-80 lg:w-96 flex flex-col border-t md:border-l border-neutral-800 bg-neutral-950 overflow-hidden min-h-[200px]">
           <div className="flex-1 p-3 overflow-y-auto space-y-2 text-sm">
-            {msgs.map((msg, i) => (
-              <div key={i} className={`p-2 rounded max-w-[85%] ${
-                msg.sender === 'system' ? 'bg-neutral-900 text-neutral-400 mx-auto text-center text-xs w-full' :
-                msg.sender === 'you' ? 'bg-blue-600 text-white ml-auto' : 'bg-neutral-800 text-white'
-              }`}>
-                {msg.sender !== 'system' && <span className="block text-[10px] opacity-60 uppercase font-bold">{msg.sender}</span>}
-                {msg.text}
+            {chatLog.map((m, i) => (
+              <div key={i} className={`p-2 rounded max-w-[85%] ${m.sender === 'sys' ? 'bg-neutral-900 text-neutral-400 mx-auto text-center text-xs' : m.sender === 'you' ? 'bg-blue-600 ml-auto' : 'bg-neutral-800'}`}>
+                {m.sender !== 'sys' && <span className="block text-[10px] opacity-60 uppercase font-bold">{m.sender}</span>}
+                {m.text}
               </div>
             ))}
           </div>
-
-          <form onSubmit={sendMsg} className="p-2 border-t border-neutral-800 flex gap-2 shrink-0 bg-neutral-950 mb-safe">
-            <input
-              type="text"
-              value={txt}
-              onChange={(e) => setTxt(e.target.value)}
-              disabled={currState !== 'connected'}
-              placeholder={currState === 'connected' ? "Message..." : "Connect first..."}
-              className="flex-1 bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
-            />
-            <button
-              type="submit"
-              disabled={currState !== 'connected'}
-              className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-semibold disabled:opacity-50 transition-colors"
-            >
-              Send
-            </button>
+          <form onSubmit={handleSend} className="p-2 border-t border-neutral-800 flex gap-2 shrink-0 bg-neutral-950 mb-safe">
+            <input type="text" value={msgInput} onChange={(e) => setMsgInput(e.target.value)} disabled={matchStatus !== 'connected'} className="flex-1 bg-neutral-900 rounded px-3 py-2 text-white focus:outline-none" placeholder="Message..." />
+            <button type="submit" disabled={matchStatus !== 'connected'} className="bg-blue-600 px-4 py-2 rounded font-semibold disabled:opacity-50">Send</button>
           </form>
         </div>
       </main>

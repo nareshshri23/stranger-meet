@@ -131,17 +131,20 @@ export default function App() {
       if (pcRef.current) pcRef.current.close()
       waitQueue.current = []
 
-      let temp_webrtc_opts = {
+      // 1. Hardcoded OpenRelay Config
+      let rtcConfig = {
           iceServers: [
               { urls: 'stun:stun.l.google.com:19302' },
               { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
               { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
           ]
-      };
+      }
 
+      // 2. Create the Peer Connection
       const peerCnn = new RTCPeerConnection(rtcConfig)
       pcRef.current = peerCnn
 
+      // 3. Setup Data Channels (Chat)
       if (isCaller) {
           let dChan = peerCnn.createDataChannel('chat')
           dataChanRef.current = dChan
@@ -153,18 +156,22 @@ export default function App() {
           }
       }
 
+      // 4. ICE Candidate Handling
       peerCnn.onicecandidate = (evt) => {
           if (evt.candidate) sockInstance.emit('send_signal', { iceCandidate: evt.candidate })
       }
 
+      // 5. Receive Remote Video
       peerCnn.ontrack = (evt) => {
           if (remoteVidRef.current) remoteVidRef.current.srcObject = evt.streams[0]
       }
 
+      // 6. Send Local Video
       if (localStreamObj.current) {
           localStreamObj.current.getTracks().forEach(trk => peerCnn.addTrack(trk, localStreamObj.current))
       }
 
+      // 7. Create Offer if Caller
       if (isCaller) {
           try {
               let offerSdp = await peerCnn.createOffer()

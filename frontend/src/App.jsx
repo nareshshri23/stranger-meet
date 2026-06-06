@@ -131,20 +131,13 @@ export default function App() {
       if (pcRef.current) pcRef.current.close()
       waitQueue.current = []
 
-      let rtcConfig = {
+      let temp_webrtc_opts = {
           iceServers: [
               { urls: 'stun:stun.l.google.com:19302' },
-              { 
-                  // Providing both UDP and TCP guarantees a fallback if the carrier blocks UDP
-                  urls: [
-                      'turn:free.expressturn.com:3478?transport=udp',
-                      'turn:free.expressturn.com:3478?transport=tcp'
-                  ], 
-                  username: import.meta.env.VITE_TURN_USERNAME,        
-                  credential: import.meta.env.VITE_TURN_PASSWORD       
-              }
+              { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+              { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
           ]
-      }
+      };
 
       const peerCnn = new RTCPeerConnection(rtcConfig)
       pcRef.current = peerCnn

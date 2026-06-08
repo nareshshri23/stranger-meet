@@ -2,9 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { auth, logInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { Mic, MicOff, Video, VideoOff, LogOut, User } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, LogOut, User, Smile } from 'lucide-react';
 
 const SOKET_URL = 'https://stranger-meet-api.onrender.com'
+const COMMON_EMOJIS = ["😀", "😂", "🥰", "😎", "😭", "🥺", "😡", "👍", "👎", "❤️", "🔥", "✨", "🎉", "💯", "🙏", "👋", "👀", "💀", "🤡", "👽"];
 
 export default function App() {
   const [u, setU] = useState(null)
@@ -16,6 +17,8 @@ export default function App() {
   const [matchStatus, setMatchStatus] = useState('idle') 
   const [chatLog, setChatLog] = useState([])
   const [msgInput, setMsgInput] = useState('')
+  const [strangerTyping, setStrangerTyping] = useState(false)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
 
   const [camActive, setCamActive] = useState(true)
   const [micActive, setMicActive] = useState(true)
@@ -27,6 +30,7 @@ export default function App() {
   let pcRef = useRef(null)
   let dataChanRef = useRef(null)
   let waitQueue = useRef([]) 
+  let typingTimeoutRef = useRef(null) 
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (usr) => {
@@ -103,6 +107,7 @@ export default function App() {
 
     s_conn.on('partner_disconnected', (info) => {
       setMatchStatus('idle')
+      setStrangerTyping(false)
       setChatLog((prev) => [...prev, { sender: 'sys', text: info.message }])
       if (remoteVidRef.current) remoteVidRef.current.srcObject = null
       if (pcRef.current) {
@@ -123,7 +128,22 @@ export default function App() {
 
   const attachDataEvents = (chan) => {
       chan.onmessage = (evt) => {
-          setChatLog((prev) => [...prev, { sender: 'stranger', text: evt.data }])
+          try {
+              const data = JSON.parse(evt.data);
+              if (data.type === 'msg') {
+                  setStrangerTyping(false);
+                  setChatLog((prev) => [...prev, { sender: 'stranger', text: data.payload }]);
+              } else if (data.type === 'typing') {
+                  setStrangerTyping(true);
+                  if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                  typingTimeoutRef.current = setTimeout(() => {
+                      setStrangerTyping(false);
+                  }, 2000);
+              }
+          } catch(e) {
+              setStrangerTyping(false);
+              setChatLog((prev) => [...prev, { sender: 'stranger', text: evt.data }]);
+          }
       }
   }
 
@@ -184,6 +204,7 @@ export default function App() {
   const clickNext = () => {
     if (sockt) {
       setMatchStatus('searching')
+      setStrangerTyping(false)
       setChatLog([{ sender: 'sys', text: 'Finding match...' }])
       
       if (remoteVidRef.current) remoteVidRef.current.srcObject = null
@@ -198,11 +219,23 @@ export default function App() {
     }
   }
 
+  const handleTyping = (e) => {
+      setMsgInput(e.target.value);
+      if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
+          dataChanRef.current.send(JSON.stringify({ type: 'typing' }));
+      }
+  }
+
+  const handleEmojiClick = (emoji) => {
+      setMsgInput((prev) => prev + emoji);
+      setShowEmojiPicker(false);
+  }
+
   const handleSend = (evt) => {
     evt.preventDefault()
     if (!msgInput.trim()) return
     if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
-        dataChanRef.current.send(msgInput)
+        dataChanRef.current.send(JSON.stringify({ type: 'msg', payload: msgInput }))
     }
     setChatLog((prev) => [...prev, { sender: 'you', text: msgInput }])
     setMsgInput('')
@@ -323,10 +356,25 @@ export default function App() {
                 {m.text}
               </div>
             ))}
+            {strangerTyping && (
+              <div className="text-xs text-neutral-500 italic p-2">Stranger is typing...</div>
+            )}
           </div>
-          <form onSubmit={handleSend} className="p-2 border-t border-neutral-800 flex gap-2 shrink-0 bg-neutral-950 mb-safe">
-            <input type="text" value={msgInput} onChange={(e) => setMsgInput(e.target.value)} disabled={matchStatus !== 'connected'} className="flex-1 bg-neutral-900 rounded px-3 py-2 text-white focus:outline-none" placeholder="Message..." />
-            <button type="submit" disabled={matchStatus !== 'connected'} className="bg-blue-600 px-4 py-2 rounded font-semibold disabled:opacity-50">Send</button>
+          <form onSubmit={handleSend} className="p-2 border-t border-neutral-800 flex gap-2 shrink-0 bg-neutral-950 mb-safe relative">
+            {showEmojiPicker && (
+                <div className="absolute bottom-14 left-2 bg-neutral-900 border border-neutral-700 rounded-lg p-2 grid grid-cols-5 gap-2 z-50 shadow-2xl">
+                    {COMMON_EMOJIS.map(emoji => (
+                        <button type="button" key={emoji} onClick={() => handleEmojiClick(emoji)} className="text-xl hover:bg-neutral-800 rounded p-1 transition-colors">
+                            {emoji}
+                        </button>
+                    ))}
+                </div>
+            )}
+            <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="text-neutral-400 hover:text-white p-2 shrink-0">
+                <Smile className="w-6 h-6" />
+            </button>
+            <input type="text" value={msgInput} onChange={handleTyping} disabled={matchStatus !== 'connected'} className="flex-1 bg-neutral-900 rounded px-3 py-2 text-white focus:outline-none" placeholder="Message..." />
+            <button type="submit" disabled={matchStatus !== 'connected'} className="bg-blue-600 px-4 py-2 rounded font-semibold disabled:opacity-50 shrink-0">Send</button>
           </form>
         </div>
       </main>

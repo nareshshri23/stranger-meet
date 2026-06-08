@@ -14,14 +14,54 @@ export default function App() {
 
   const [sockt, setSockt] = useState(null)
   const [socketReady, setSocketReady] = useState(false)
-  const [matchStatus, setMatchStatus] = useState('idle') 
+  const [matchStatus, setMatchStatus] = useState('idle')
   const [chatLog, setChatLog] = useState([])
   const [msgInput, setMsgInput] = useState('')
   const [strangerTyping, setStrangerTyping] = useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [strangerCamActive, setStrangerCamActive] = useState(true)
 
-  const [camActive, setCamActive] = useState(true)
-  const [micActive, setMicActive] = useState(true)
+  const [camActive, setCamActive] = useState(false)
+  const [micActive, setMicActive] = useState(false)
+  const camActiveRef = useRef(false)
+
+  const initMedia = async (reqVideo, reqAudio) => {
+      try {
+          let s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+          localStreamObj.current = s
+          
+          let vTrack = s.getVideoTracks()[0]
+          if (vTrack) vTrack.enabled = reqVideo;
+          
+          let aTrack = s.getAudioTracks()[0]
+          if (aTrack) aTrack.enabled = reqAudio;
+
+          if (selfVidRef.current) selfVidRef.current.srcObject = s
+          
+          setCamActive(reqVideo)
+          camActiveRef.current = reqVideo
+          setMicActive(reqAudio)
+
+          if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
+              dataChanRef.current.send(JSON.stringify({ type: 'cam_toggle', payload: reqVideo }));
+          }
+
+          if (pcRef.current) {
+              s.getTracks().forEach(trk => {
+                  let senders = pcRef.current.getSenders();
+                  let sender = senders.find(sdr => sdr.track && sdr.track.kind === trk.kind);
+                  if (sender) {
+                      sender.replaceTrack(trk);
+                  } else {
+                      pcRef.current.addTrack(trk, s);
+                  }
+              });
+          }
+      } catch (err) {
+          console.log("cam fail", err)
+          alert("Please allow camera and microphone access.")
+      }
+  }
 
   const selfVidRef = useRef(null)
   const remoteVidRef = useRef(null)
@@ -29,13 +69,13 @@ export default function App() {
 
   let pcRef = useRef(null)
   let dataChanRef = useRef(null)
-  let waitQueue = useRef([]) 
-  let typingTimeoutRef = useRef(null) 
+  let waitQueue = useRef([])
+  let typingTimeoutRef = useRef(null)
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (usr) => {
-        setU(usr)
-        setLoadingAuth(false)
+      setU(usr)
+      setLoadingAuth(false)
     });
     return () => unsub();
   }, [])
@@ -48,22 +88,12 @@ export default function App() {
 
     s_conn.on('connect', () => { setSocketReady(true) })
     s_conn.on('disconnect', () => { setSocketReady(false) })
-    
-    s_conn.on('connect_error', (err) => {
-        console.error("rejected by srvr:", err.message);
-        setBannedFlg(true);
-        setSocketReady(false);
-    });
 
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then((s) => {
-        localStreamObj.current = s
-        if (selfVidRef.current) selfVidRef.current.srcObject = s
-      })
-      .catch((err) => {
-        console.log("cam fail", err)
-        alert("Plz allow camera")
-      })
+    s_conn.on('connect_error', (err) => {
+      console.error("rejected by srvr:", err.message);
+      setBannedFlg(true);
+      setSocketReady(false);
+    });
 
     s_conn.on('waiting', (data) => {
       setMatchStatus('searching')
@@ -79,138 +109,155 @@ export default function App() {
     s_conn.on('receive_signal', async (info) => {
       if (!pcRef.current) return
       try {
-          if (info.sdp) {
-              await pcRef.current.setRemoteDescription(new RTCSessionDescription(info.sdp))
-              
-              while (waitQueue.current.length > 0) {
-                  let tempCand = waitQueue.current.shift()
-                  await pcRef.current.addIceCandidate(new RTCIceCandidate(tempCand))
-              }
+        if (info.sdp) {
+          await pcRef.current.setRemoteDescription(new RTCSessionDescription(info.sdp))
 
-              if (info.sdp.type === 'offer') {
-                  let reply = await pcRef.current.createAnswer()
-                  await pcRef.current.setLocalDescription(reply)
-                  s_conn.emit('send_signal', { sdp: pcRef.current.localDescription })
-              }
+          while (waitQueue.current.length > 0) {
+            let tempCand = waitQueue.current.shift()
+            await pcRef.current.addIceCandidate(new RTCIceCandidate(tempCand))
           }
-          if (info.iceCandidate) {
-              if (pcRef.current.remoteDescription) {
-                  await pcRef.current.addIceCandidate(new RTCIceCandidate(info.iceCandidate))
-              } else {
-                  waitQueue.current.push(info.iceCandidate) 
-              }
+
+          if (info.sdp.type === 'offer') {
+            let reply = await pcRef.current.createAnswer()
+            await pcRef.current.setLocalDescription(reply)
+            s_conn.emit('send_signal', { sdp: pcRef.current.localDescription })
           }
+        }
+        if (info.iceCandidate) {
+          if (pcRef.current.remoteDescription) {
+            await pcRef.current.addIceCandidate(new RTCIceCandidate(info.iceCandidate))
+          } else {
+            waitQueue.current.push(info.iceCandidate)
+          }
+        }
       } catch (e) {
-          console.log("sig err", e)
+        console.log("sig err", e)
       }
     })
 
     s_conn.on('partner_disconnected', (info) => {
       setMatchStatus('idle')
       setStrangerTyping(false)
+      setStrangerCamActive(true)
       setChatLog((prev) => [...prev, { sender: 'sys', text: info.message }])
       if (remoteVidRef.current) remoteVidRef.current.srcObject = null
       if (pcRef.current) {
-          pcRef.current.close()
-          pcRef.current = null
+        pcRef.current.close()
+        pcRef.current = null
       }
       dataChanRef.current = null
       waitQueue.current = []
     })
 
     s_conn.on('you_got_banned', () => {
-        setBannedFlg(true)
-        if (localStreamObj.current) localStreamObj.current.getTracks().forEach(t => t.stop())
+      setBannedFlg(true)
+      if (localStreamObj.current) localStreamObj.current.getTracks().forEach(t => t.stop())
     })
 
     return () => { s_conn.disconnect() }
   }, [u])
 
   const attachDataEvents = (chan) => {
-      chan.onmessage = (evt) => {
-          try {
-              const data = JSON.parse(evt.data);
-              if (data.type === 'msg') {
-                  setStrangerTyping(false);
-                  setChatLog((prev) => [...prev, { sender: 'stranger', text: data.payload }]);
-              } else if (data.type === 'typing') {
-                  setStrangerTyping(true);
-                  if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-                  typingTimeoutRef.current = setTimeout(() => {
-                      setStrangerTyping(false);
-                  }, 2000);
-              }
-          } catch(e) {
-              setStrangerTyping(false);
-              setChatLog((prev) => [...prev, { sender: 'stranger', text: evt.data }]);
-          }
+    chan.onmessage = (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        if (data.type === 'msg') {
+          setStrangerTyping(false);
+          setChatLog((prev) => [...prev, { sender: 'stranger', text: data.payload }]);
+        } else if (data.type === 'typing') {
+          setStrangerTyping(true);
+          if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = setTimeout(() => {
+            setStrangerTyping(false);
+          }, 2000);
+        } else if (data.type === 'cam_toggle') {
+          setStrangerCamActive(data.payload);
+        }
+      } catch (e) {
+        setStrangerTyping(false);
+        setChatLog((prev) => [...prev, { sender: 'stranger', text: evt.data }]);
       }
+    }
   }
 
   const initWebRTC = async (isCaller, sockInstance) => {
-      if (pcRef.current) pcRef.current.close()
-      waitQueue.current = []
+    if (pcRef.current) pcRef.current.close()
+    waitQueue.current = []
 
-      // Secure, production-ready configuration using Vercel Environment Variables
-      let rtcConfig = {
-          iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { 
-                  urls: [
-                      'turn:free.expressturn.com:3478?transport=udp',
-                      'turn:free.expressturn.com:3478?transport=tcp'
-                  ], 
-                  username: import.meta.env.VITE_TURN_USERNAME,        
-                  credential: import.meta.env.VITE_TURN_PASSWORD       
-              }
-          ]
+    let rtcConfig = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        {
+          urls: [
+            'turn:free.expressturn.com:3478?transport=udp',
+            'turn:free.expressturn.com:3478?transport=tcp'
+          ],
+          username: import.meta.env.VITE_TURN_USERNAME,
+          credential: import.meta.env.VITE_TURN_PASSWORD
+        }
+      ]
+    }
+
+    const peerCnn = new RTCPeerConnection(rtcConfig)
+    pcRef.current = peerCnn
+
+    if (isCaller) {
+      let dChan = peerCnn.createDataChannel('chat')
+      dataChanRef.current = dChan
+      dChan.onopen = () => {
+        dChan.send(JSON.stringify({ type: 'cam_toggle', payload: camActiveRef.current }));
       }
-
-      const peerCnn = new RTCPeerConnection(rtcConfig)
-      pcRef.current = peerCnn
-
-      if (isCaller) {
-          let dChan = peerCnn.createDataChannel('chat')
-          dataChanRef.current = dChan
-          attachDataEvents(dChan)
-      } else {
-          peerCnn.ondatachannel = (evt) => {
-              dataChanRef.current = evt.channel
-              attachDataEvents(evt.channel)
-          }
+      attachDataEvents(dChan)
+    } else {
+      peerCnn.ondatachannel = (evt) => {
+        dataChanRef.current = evt.channel
+        evt.channel.onopen = () => {
+          evt.channel.send(JSON.stringify({ type: 'cam_toggle', payload: camActiveRef.current }));
+        }
+        attachDataEvents(evt.channel)
       }
+    }
 
-      peerCnn.onicecandidate = (evt) => {
-          if (evt.candidate) sockInstance.emit('send_signal', { iceCandidate: evt.candidate })
-      }
+    peerCnn.onicecandidate = (evt) => {
+      if (evt.candidate) sockInstance.emit('send_signal', { iceCandidate: evt.candidate })
+    }
 
-      peerCnn.ontrack = (evt) => {
-          if (remoteVidRef.current) remoteVidRef.current.srcObject = evt.streams[0]
-      }
+    peerCnn.ontrack = (evt) => {
+      if (remoteVidRef.current) remoteVidRef.current.srcObject = evt.streams[0]
+    }
 
-      if (localStreamObj.current) {
-          localStreamObj.current.getTracks().forEach(trk => peerCnn.addTrack(trk, localStreamObj.current))
-      }
+    if (localStreamObj.current) {
+      localStreamObj.current.getTracks().forEach(trk => peerCnn.addTrack(trk, localStreamObj.current))
+    }
 
-      if (isCaller) {
-          try {
-              let offerSdp = await peerCnn.createOffer()
-              await peerCnn.setLocalDescription(offerSdp)
-              sockInstance.emit('send_signal', { sdp: peerCnn.localDescription })
-          } catch (err) { console.log(err) }
-      }
+    if (isCaller) {
+      try {
+        let offerSdp = await peerCnn.createOffer()
+        await peerCnn.setLocalDescription(offerSdp)
+        sockInstance.emit('send_signal', { sdp: peerCnn.localDescription })
+      } catch (err) { console.log(err) }
+    }
+
+    peerCnn.onnegotiationneeded = async () => {
+      try {
+        let offer = await peerCnn.createOffer()
+        await peerCnn.setLocalDescription(offer)
+        sockInstance.emit('send_signal', { sdp: peerCnn.localDescription })
+      } catch (err) { console.error(err) }
+    }
   }
 
   const clickNext = () => {
     if (sockt) {
       setMatchStatus('searching')
       setStrangerTyping(false)
+      setStrangerCamActive(true)
       setChatLog([{ sender: 'sys', text: 'Finding match...' }])
-      
+
       if (remoteVidRef.current) remoteVidRef.current.srcObject = null
       if (pcRef.current) {
-          pcRef.current.close()
-          pcRef.current = null
+        pcRef.current.close()
+        pcRef.current = null
       }
       dataChanRef.current = null
       waitQueue.current = []
@@ -220,94 +267,115 @@ export default function App() {
   }
 
   const handleTyping = (e) => {
-      setMsgInput(e.target.value);
-      if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
-          dataChanRef.current.send(JSON.stringify({ type: 'typing' }));
-      }
+    setMsgInput(e.target.value);
+    if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
+      dataChanRef.current.send(JSON.stringify({ type: 'typing' }));
+    }
   }
 
   const handleEmojiClick = (emoji) => {
-      setMsgInput((prev) => prev + emoji);
-      setShowEmojiPicker(false);
+    setMsgInput((prev) => prev + emoji);
+    setShowEmojiPicker(false);
   }
 
   const handleSend = (evt) => {
     evt.preventDefault()
     if (!msgInput.trim()) return
     if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
-        dataChanRef.current.send(JSON.stringify({ type: 'msg', payload: msgInput }))
+      dataChanRef.current.send(JSON.stringify({ type: 'msg', payload: msgInput }))
     }
     setChatLog((prev) => [...prev, { sender: 'you', text: msgInput }])
     setMsgInput('')
   }
 
-  const switchMic = () => {
-      if (localStreamObj.current) {
-          let aTrack = localStreamObj.current.getAudioTracks()[0]
-          if (aTrack) {
-              aTrack.enabled = !aTrack.enabled
-              setMicActive(aTrack.enabled)
-          }
+  const switchMic = async () => {
+    if (!localStreamObj.current) {
+        await initMedia(camActive, true);
+        return;
+    }
+    if (localStreamObj.current) {
+      let aTrack = localStreamObj.current.getAudioTracks()[0]
+      if (aTrack) {
+        aTrack.enabled = !aTrack.enabled
+        setMicActive(aTrack.enabled)
       }
+    }
   }
 
   const switchCam = async () => {
-      let isMobileDev = /Mobi|Android/i.test(navigator.userAgent)
+    if (!localStreamObj.current) {
+        await initMedia(true, micActive);
+        return;
+    }
+    let isMobileDev = /Mobi|Android/i.test(navigator.userAgent)
 
-      if (camActive) {
-          let vTrack = localStreamObj.current.getVideoTracks()[0]
-          if (vTrack) {
-              if (isMobileDev) vTrack.enabled = false
-              else vTrack.stop()
-          }
-          setCamActive(false)
-      } else {
-          if (isMobileDev) {
-              let vTrack = localStreamObj.current.getVideoTracks()[0]
-              if (vTrack) vTrack.enabled = true
-              setCamActive(true)
-          } else {
-              try {
-                  let newStream = await navigator.mediaDevices.getUserMedia({ video: true })
-                  let newVTrack = newStream.getVideoTracks()[0]
-                  
-                  let oldTrack = localStreamObj.current.getVideoTracks()[0]
-                  if (oldTrack) localStreamObj.current.removeTrack(oldTrack)
-                  
-                  localStreamObj.current.addTrack(newVTrack)
-                  if (selfVidRef.current) selfVidRef.current.srcObject = localStreamObj.current
-                  
-                  if (pcRef.current) {
-                      let sender = pcRef.current.getSenders().find(s => s.track && s.track.kind === 'video')
-                      if (sender) sender.replaceTrack(newVTrack)
-                  }
-                  setCamActive(true)
-              } catch (e) {
-                  console.log("blocked", e)
-                  alert("cam blocked")
-              }
-          }
+    if (camActive) {
+      let vTrack = localStreamObj.current.getVideoTracks()[0]
+      if (vTrack) {
+        if (isMobileDev) vTrack.enabled = false
+        else vTrack.stop()
       }
+      setCamActive(false)
+      camActiveRef.current = false;
+      if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
+        dataChanRef.current.send(JSON.stringify({ type: 'cam_toggle', payload: false }));
+      }
+    } else {
+      if (isMobileDev) {
+        let vTrack = localStreamObj.current.getVideoTracks()[0]
+        if (vTrack) vTrack.enabled = true
+        setCamActive(true)
+        camActiveRef.current = true;
+        if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
+          dataChanRef.current.send(JSON.stringify({ type: 'cam_toggle', payload: true }));
+        }
+      } else {
+        try {
+          let newStream = await navigator.mediaDevices.getUserMedia({ video: true })
+          let newVTrack = newStream.getVideoTracks()[0]
+
+          let oldTrack = localStreamObj.current.getVideoTracks()[0]
+          if (oldTrack) localStreamObj.current.removeTrack(oldTrack)
+
+          localStreamObj.current.addTrack(newVTrack)
+          if (selfVidRef.current) selfVidRef.current.srcObject = localStreamObj.current
+
+          if (pcRef.current) {
+            let sender = pcRef.current.getSenders().find(s => s.track && s.track.kind === 'video')
+            if (sender) sender.replaceTrack(newVTrack)
+            else pcRef.current.addTrack(newVTrack, localStreamObj.current)
+          }
+          setCamActive(true)
+          camActiveRef.current = true;
+          if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
+            dataChanRef.current.send(JSON.stringify({ type: 'cam_toggle', payload: true }));
+          }
+        } catch (e) {
+          console.log("blocked", e)
+          alert("cam blocked")
+        }
+      }
+    }
   }
 
   if (loadingAuth) return <div className="h-[100dvh] bg-neutral-950 flex items-center justify-center text-neutral-500">Loading...</div>
-  
+
   if (bannedFlg) return (
-      <div className="h-[100dvh] bg-neutral-950 flex flex-col items-center justify-center text-white p-4 text-center">
-          <h1 className="text-4xl font-bold text-red-500 mb-4">BANNED</h1>
-          <p className="text-neutral-400">Your Google Account has been blocked.</p>
-      </div>
+    <div className="h-[100dvh] bg-neutral-950 flex flex-col items-center justify-center text-white p-4 text-center">
+      <h1 className="text-4xl font-bold text-red-500 mb-4">BANNED</h1>
+      <p className="text-neutral-400">Your Google Account has been blocked.</p>
+    </div>
   )
 
   if (!u) return (
-      <div className="h-[100dvh] bg-neutral-950 flex flex-col items-center justify-center text-white p-4">
-          <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-lg max-w-md w-full text-center shadow-2xl">
-              <h1 className="text-2xl font-bold text-blue-500 mb-4">STRANGER_MEET</h1>
-              <button onClick={logInWithGoogle} className="w-full flex items-center justify-center gap-3 px-6 py-3 rounded bg-white text-black font-semibold">
-                  Login with Google
-              </button>
-          </div>
+    <div className="h-[100dvh] bg-neutral-950 flex flex-col items-center justify-center text-white p-4">
+      <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-lg max-w-md w-full text-center shadow-2xl">
+        <h1 className="text-2xl font-bold text-blue-500 mb-4">STRANGER_MEET</h1>
+        <button onClick={logInWithGoogle} className="w-full flex items-center justify-center gap-3 px-6 py-3 rounded bg-white text-black font-semibold">
+          Login with Google
+        </button>
       </div>
+    </div>
   )
 
   return (
@@ -316,8 +384,8 @@ export default function App() {
         <h1 className="text-base md:text-xl font-bold text-blue-500">STRANGER_MEET</h1>
         <div className="flex items-center gap-3 md:gap-4">
           <div className="flex items-center gap-2 md:gap-3">
-              <img src={u.photoURL} alt="pfp" className="hidden md:block w-8 h-8 rounded-full border border-neutral-700" />
-              <button onClick={logOut} className="text-neutral-400 hover:text-red-400 p-2 md:p-1"><LogOut className="w-5 h-5" /></button>
+            <img src={u.photoURL} alt="pfp" className="hidden md:block w-8 h-8 rounded-full border border-neutral-700" />
+            <button onClick={logOut} className="text-neutral-400 hover:text-red-400 p-2 md:p-1"><LogOut className="w-5 h-5" /></button>
           </div>
           <button
             onClick={clickNext}
@@ -335,15 +403,36 @@ export default function App() {
       <main className="flex-1 flex flex-col md:flex-row overflow-hidden">
         <div className="relative w-full h-[40vh] md:h-auto md:flex-1 flex md:flex-row gap-2 p-2 bg-neutral-900 shrink-0">
           <div className="w-full h-full md:w-1/2 bg-black rounded-lg overflow-hidden border border-neutral-800 relative flex items-center justify-center">
-            <video ref={remoteVidRef} autoPlay playsInline className="w-full h-full object-cover" />
+            <video ref={remoteVidRef} autoPlay playsInline className={`w-full h-full object-cover ${(!strangerCamActive || matchStatus !== 'connected') ? 'hidden' : ''}`} />
+
+            {matchStatus === 'idle' && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-800 text-neutral-500">
+                <User className="w-12 h-12 md:w-24 md:h-24 mb-4 opacity-20" />
+                <p className="text-sm font-medium">Click Start to meet someone</p>
+              </div>
+            )}
+
+            {matchStatus === 'searching' && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-800 text-neutral-400">
+                <div className="animate-pulse flex flex-col items-center">
+                  <User className="w-12 h-12 md:w-24 md:h-24 mb-4 opacity-50" />
+                  <p className="text-sm font-medium">Looking for a stranger...</p>
+                </div>
+              </div>
+            )}
+
+            {matchStatus === 'connected' && !strangerCamActive && (
+              <div className="absolute inset-0 flex items-center justify-center bg-neutral-800"><User className="w-12 h-12 md:w-24 md:h-24 text-neutral-600" /></div>
+            )}
+
             <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-0.5 rounded text-xs z-20">Stranger</div>
           </div>
-          <div className="absolute bottom-4 right-4 w-24 h-36 md:relative md:w-1/2 md:h-full z-30 bg-neutral-800 rounded-lg overflow-hidden border border-neutral-600 shadow-2xl md:shadow-none flex items-center justify-center">
+          <div className="absolute bottom-4 right-4 md:bottom-auto md:right-auto w-24 h-36 md:relative md:w-1/2 md:h-full z-30 bg-neutral-800 rounded-lg overflow-hidden border border-neutral-600 shadow-2xl md:shadow-none flex items-center justify-center">
             <video ref={selfVidRef} autoPlay playsInline muted className={`w-full h-full object-cover transform -scale-x-100 ${!camActive ? 'hidden' : ''}`} />
             {!camActive && <div className="absolute inset-0 flex items-center justify-center bg-neutral-800"><User className="w-12 h-12 md:w-24 md:h-24 text-neutral-600" /></div>}
             <div className="absolute top-1 right-1 flex flex-col md:flex-row gap-1 z-10">
-                <button onClick={switchMic} className="bg-neutral-900/80 p-1.5 rounded">{micActive ? <Mic className="w-4 h-4 text-white" /> : <MicOff className="w-4 h-4 text-red-500" />}</button>
-                <button onClick={switchCam} className="bg-neutral-900/80 p-1.5 rounded">{camActive ? <Video className="w-4 h-4 text-white" /> : <VideoOff className="w-4 h-4 text-red-500" />}</button>
+              <button onClick={switchMic} className="bg-neutral-900/80 p-1.5 rounded">{micActive ? <Mic className="w-4 h-4 text-white" /> : <MicOff className="w-4 h-4 text-red-500" />}</button>
+              <button onClick={switchCam} className="bg-neutral-900/80 p-1.5 rounded">{camActive ? <Video className="w-4 h-4 text-white" /> : <VideoOff className="w-4 h-4 text-red-500" />}</button>
             </div>
           </div>
         </div>
@@ -362,16 +451,16 @@ export default function App() {
           </div>
           <form onSubmit={handleSend} className="p-2 border-t border-neutral-800 flex gap-2 shrink-0 bg-neutral-950 mb-safe relative">
             {showEmojiPicker && (
-                <div className="absolute bottom-14 left-2 bg-neutral-900 border border-neutral-700 rounded-lg p-2 grid grid-cols-5 gap-2 z-50 shadow-2xl">
-                    {COMMON_EMOJIS.map(emoji => (
-                        <button type="button" key={emoji} onClick={() => handleEmojiClick(emoji)} className="text-xl hover:bg-neutral-800 rounded p-1 transition-colors">
-                            {emoji}
-                        </button>
-                    ))}
-                </div>
+              <div className="absolute bottom-14 left-2 bg-neutral-900 border border-neutral-700 rounded-lg p-2 grid grid-cols-5 gap-2 z-50 shadow-2xl">
+                {COMMON_EMOJIS.map(emoji => (
+                  <button type="button" key={emoji} onClick={() => handleEmojiClick(emoji)} className="text-xl hover:bg-neutral-800 rounded p-1 transition-colors">
+                    {emoji}
+                  </button>
+                ))}
+              </div>
             )}
             <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="text-neutral-400 hover:text-white p-2 shrink-0">
-                <Smile className="w-6 h-6" />
+              <Smile className="w-6 h-6" />
             </button>
             <input type="text" value={msgInput} onChange={handleTyping} disabled={matchStatus !== 'connected'} className="flex-1 bg-neutral-900 rounded px-3 py-2 text-white focus:outline-none" placeholder="Message..." />
             <button type="submit" disabled={matchStatus !== 'connected'} className="bg-blue-600 px-4 py-2 rounded font-semibold disabled:opacity-50 shrink-0">Send</button>

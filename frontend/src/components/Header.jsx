@@ -4,7 +4,7 @@ import { LogOut } from 'lucide-react';
 export default function Header({ user, onLogout, onNext, socketReady, matchStatus }) {
   return (
     <header className="p-3 md:p-4 bg-neutral-900 border-b border-neutral-800 flex justify-between items-center shrink-0">
-      <h1 className="text-base md:text-xl font-bold text-blue-500">STRANGER_MEET</h1>
+      <h1 className="text-base md:text-xl font-bold text-blue-500">APARICHAT</h1>
       <div className="flex items-center gap-3 md:gap-4">
         <div className="flex items-center gap-2 md:gap-3">
           <img src={user.photoURL} alt="pfp" className="hidden md:block w-8 h-8 rounded-full border border-neutral-700" />

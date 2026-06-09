@@ -18,7 +18,7 @@ const server = createServer(app);
 const io = new Server(server, {
     cors: { 
         // We removed SAFE_ORIGIN and put the exact allowed websites right here
-        origin: ["http://localhost:5173", "https://stranger-meet-two.vercel.app"], 
+        origin: ["http://localhost:5173", "https://stranger-meet-two.vercel.app", "https://aparichat.vercel.app"],
         methods: ["GET", "POST"] 
     }
 });

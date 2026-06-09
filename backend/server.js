@@ -57,7 +57,7 @@ io.on('connection', (socket) => {
 
         // 1. Initialize their tracker if they don't have one
         if (!spam_cache[uid]) {
-            spam_cache[uid] = { strikes: 0, last_hit: now_ms };
+            spam_cache[uid] = { strikes: 0, last_hit: 0 };
         }
 
         // 2. Calculate how fast they clicked since their last click

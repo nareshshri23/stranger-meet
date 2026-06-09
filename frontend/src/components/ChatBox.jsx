@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Smile } from 'lucide-react';
 
 const COMMON_EMOJIS = ["😀", "😂", "🥰", "😎", "😭", "🥺", "😡", "👍", "👎", "❤️", "🔥", "✨", "🎉", "💯", "🙏", "👋", "👀", "💀", "🤡", "👽"];
@@ -14,6 +14,12 @@ export default function ChatBox({
   onToggleEmoji,
   onEmojiClick
 }) {
+  const chatEndRef = useRef(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatLog, strangerTyping]);
+
   return (
     <div className="flex-1 md:flex-none w-full md:w-80 lg:w-96 flex flex-col border-t md:border-l border-neutral-800 bg-neutral-950 overflow-hidden min-h-[200px]">
       <div className="flex-1 p-3 overflow-y-auto space-y-2 text-sm">
@@ -26,6 +32,7 @@ export default function ChatBox({
         {strangerTyping && (
           <div className="text-xs text-neutral-500 italic p-2">Stranger is typing...</div>
         )}
+        <div ref={chatEndRef} />
       </div>
       <form onSubmit={onSend} className="p-2 border-t border-neutral-800 flex gap-2 shrink-0 bg-neutral-950 mb-safe relative">
         {showEmojiPicker && (

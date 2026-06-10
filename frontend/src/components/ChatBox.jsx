@@ -21,7 +21,7 @@ export default function ChatBox({
   }, [chatLog, strangerTyping]);
 
   return (
-    <div className="flex-1 md:flex-none w-full md:w-80 lg:w-96 flex flex-col border-t md:border-l border-neutral-800 bg-neutral-950 overflow-hidden min-h-[200px]">
+    <div className="flex-1 xl:flex-none w-full xl:w-80 2xl:w-96 flex flex-col border-t xl:border-l border-neutral-800 bg-neutral-950 overflow-hidden min-h-0">
       <div className="flex-1 p-3 overflow-y-auto space-y-2 text-sm">
         {chatLog.map((m, i) => (
           <div key={i} className={`p-2 rounded max-w-[85%] ${m.sender === 'sys' ? 'bg-neutral-900 text-neutral-400 mx-auto text-center text-xs' : m.sender === 'you' ? 'bg-blue-600 ml-auto' : 'bg-neutral-800'}`}>

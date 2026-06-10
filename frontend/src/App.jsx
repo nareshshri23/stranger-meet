@@ -31,7 +31,7 @@ export default function App() {
   const [msgInput, setMsgInput] = useState('')
   const [strangerTyping, setStrangerTyping] = useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
-  const [strangerCamActive, setStrangerCamActive] = useState(true)
+  const [strangerCamActive, setStrangerCamActive] = useState(false)
 
   const [camActive, setCamActive] = useState(false)
   const [micActive, setMicActive] = useState(false)
@@ -159,7 +159,7 @@ export default function App() {
     s_conn.on('partner_disconnected', (info) => {
       setMatchStatus('idle')
       setStrangerTyping(false)
-      setStrangerCamActive(true)
+      setStrangerCamActive(false)
       setChatLog((prev) => [...prev, { sender: 'sys', text: info.message }])
       if (remoteVidRef.current) remoteVidRef.current.srcObject = null
       if (pcRef.current) {
@@ -225,16 +225,32 @@ export default function App() {
     if (isCaller) {
       let dChan = peerCnn.createDataChannel('chat')
       dataChanRef.current = dChan
-      dChan.onopen = () => {
+      
+      const handleChannelOpen = () => {
         dChan.send(JSON.stringify({ type: 'cam_toggle', payload: camActiveRef.current }));
       }
+      
+      if (dChan.readyState === 'open') {
+        handleChannelOpen();
+      } else {
+        dChan.onopen = handleChannelOpen;
+      }
+      
       attachDataEvents(dChan)
     } else {
       peerCnn.ondatachannel = (evt) => {
         dataChanRef.current = evt.channel
-        evt.channel.onopen = () => {
+        
+        const handleChannelOpen = () => {
           evt.channel.send(JSON.stringify({ type: 'cam_toggle', payload: camActiveRef.current }));
         }
+        
+        if (evt.channel.readyState === 'open') {
+            handleChannelOpen();
+        } else {
+            evt.channel.onopen = handleChannelOpen;
+        }
+        
         attachDataEvents(evt.channel)
       }
     }
@@ -264,7 +280,7 @@ export default function App() {
     if (sockt) {
       setMatchStatus('searching')
       setStrangerTyping(false)
-      setStrangerCamActive(true)
+      setStrangerCamActive(false)
       setChatLog([{ sender: 'sys', text: 'Finding match...' }])
 
       if (remoteVidRef.current) remoteVidRef.current.srcObject = null
@@ -418,7 +434,7 @@ export default function App() {
         onLogin={logInWithGoogle}
       />
       
-      <main className="flex-1 flex flex-col md:flex-row overflow-hidden">
+      <main className="flex-1 flex flex-col xl:flex-row overflow-hidden">
         <VideoSection 
           user={u}
           onLogin={logInWithGoogle}

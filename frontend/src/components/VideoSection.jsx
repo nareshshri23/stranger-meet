@@ -1,7 +1,9 @@
 import React from 'react';
-import { User, Mic, MicOff, Video, VideoOff } from 'lucide-react';
+import { User, Mic, MicOff, Video, VideoOff, AlertTriangle } from 'lucide-react';
 
 export default function VideoSection({
+  user,
+  onLogin,
   remoteVidRef,
   selfVidRef,
   matchStatus,
@@ -9,12 +11,25 @@ export default function VideoSection({
   camActive,
   micActive,
   onSwitchCam,
-  onSwitchMic
+  onSwitchMic,
+  onReport
 }) {
+  const showStrangerBlur = strangerCamActive && matchStatus === 'connected' && !user;
+
   return (
     <div className="relative w-full h-[40vh] md:h-auto md:flex-1 flex md:flex-row gap-2 p-2 bg-neutral-900 shrink-0">
       <div className="w-full h-full md:w-1/2 bg-black rounded-lg overflow-hidden border border-neutral-800 relative flex items-center justify-center">
-        <video ref={remoteVidRef} autoPlay playsInline className={`w-full h-full object-cover ${(!strangerCamActive || matchStatus !== 'connected') ? 'hidden' : ''}`} />
+        <video ref={remoteVidRef} autoPlay playsInline className={`w-full h-full object-cover ${(!strangerCamActive || matchStatus !== 'connected') ? 'hidden' : ''} ${showStrangerBlur ? 'blur-2xl scale-110' : ''}`} />
+
+        {showStrangerBlur && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/40 text-center p-4">
+            <Video className="w-12 h-12 md:w-16 md:h-16 mb-4 text-neutral-300" />
+            <p className="text-sm md:text-base font-medium text-white mb-4">Stranger shared video.<br/>Login to view and share yours.</p>
+            <button onClick={onLogin} className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded-full transition-colors">
+              Login to View
+            </button>
+          </div>
+        )}
 
         {matchStatus === 'idle' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-800 text-neutral-500">
@@ -37,6 +52,12 @@ export default function VideoSection({
         )}
 
         <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-0.5 rounded text-xs z-20">Stranger</div>
+        {matchStatus === 'connected' && (
+          <button onClick={onReport} title="Report Stranger" className="absolute top-2 left-2 flex items-center bg-red-600/80 hover:bg-red-500 py-1 px-2 rounded text-white text-xs font-semibold z-20 transition-colors">
+            <AlertTriangle className="w-3 h-3 mr-1" />
+            Report
+          </button>
+        )}
       </div>
 
       <div className="absolute bottom-4 right-4 md:bottom-auto md:right-auto w-24 h-36 md:relative md:w-1/2 md:h-full z-30 bg-neutral-800 rounded-lg overflow-hidden border border-neutral-600 shadow-2xl md:shadow-none flex items-center justify-center">

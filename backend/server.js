@@ -28,23 +28,29 @@ let activePairs = {};
 
 // V2.0 COMPLIANCE: UUID Banning instead of IP Banning
 const banned_uuids = new Set();
+const banned_ips = new Set();
 
 // V2.0 SECURITY: Anti-DDoS Spam Tracker
 let spam_cache = {};
 
+// Tracker for user reports (UUID -> Set of reporter UUIDs)
+const user_reports = {};
+
 // We now expect the frontend to pass a UUID when connecting
 io.use((socket, next) => {
     const user_uuid = socket.handshake.auth.token;
+    const ip = socket.handshake.headers['x-forwarded-for'] || socket.handshake.address;
     
     if (!user_uuid) {
         return next(new Error("authentication error: missing UUID"));
     }
     
-    if (banned_uuids.has(user_uuid)) {
-        return next(new Error("access denied: UUID banned"));
+    if (banned_uuids.has(user_uuid) || banned_ips.has(ip)) {
+        return next(new Error("access denied: UUID or IP banned"));
     }
     
     socket.user_uuid = user_uuid;
+    socket.user_ip = ip;
     next();
 });
 
@@ -129,14 +135,31 @@ io.on('connection', (socket) => {
             const badGuySocket = io.sockets.sockets.get(badGuyId);
 
             if (badGuySocket) {
-                // Ban the reported user by UUID
                 const badGuyUUID = badGuySocket.user_uuid;
-                banned_uuids.add(badGuyUUID);
-                console.log(`[SECURITY] BANNED UUID: ${badGuyUUID}`);
+                const reporterUUID = socket.user_uuid;
 
-                // Tell the bad guy they are banned and sever their connection
-                badGuySocket.emit('you_got_banned', { msg: 'You were reported for violating terms.' });
-                badGuySocket.disconnect(true);
+                // Initialize report set if it doesn't exist
+                if (!user_reports[badGuyUUID]) {
+                    user_reports[badGuyUUID] = new Set();
+                }
+                
+                // Add this reporter
+                user_reports[badGuyUUID].add(reporterUUID);
+
+                // Check if they hit the 3-strike threshold
+                if (user_reports[badGuyUUID].size >= 3) {
+                    banned_uuids.add(badGuyUUID);
+                    if (badGuySocket.user_ip) banned_ips.add(badGuySocket.user_ip);
+                    console.log(`[SECURITY] BANNED UUID: ${badGuyUUID} and IP: ${badGuySocket.user_ip} (3 strikes)`);
+                    
+                    badGuySocket.emit('you_got_banned', { msg: 'You were reported by multiple users for violating terms.' });
+                    badGuySocket.disconnect(true);
+                    
+                    // Clean up reports to save memory
+                    delete user_reports[badGuyUUID];
+                } else {
+                    console.log(`[SECURITY] REPORTED UUID: ${badGuyUUID} (Strike ${user_reports[badGuyUUID].size}/3)`);
+                }
             }
 
             // Clean up the room so the reporter can move on

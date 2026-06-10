@@ -9,6 +9,16 @@ import VideoSection from './components/VideoSection';
 import ChatBox from './components/ChatBox';
 
 const SOKET_URL = 'https://stranger-meet-api.onrender.com'
+
+const getDeviceId = () => {
+    let id = localStorage.getItem('device_id');
+    if (!id) { 
+      id = 'device_' + Math.random().toString(36).substring(2) + Date.now().toString(36); 
+      localStorage.setItem('device_id', id); 
+    }
+    return id;
+}
+
 export default function App() {
   const [u, setU] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
@@ -92,9 +102,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!u) return;
-
-    let s_conn = io(SOKET_URL, { auth: { token: u.uid } })
+    let s_conn = io(SOKET_URL, { auth: { token: getDeviceId() } })
     setSockt(s_conn)
 
     s_conn.on('connect', () => { setSocketReady(true) })
@@ -102,7 +110,9 @@ export default function App() {
 
     s_conn.on('connect_error', (err) => {
       console.error("rejected by srvr:", err.message);
-      setBannedFlg(true);
+      if (err.message.includes('banned')) {
+        setBannedFlg(true);
+      }
       setSocketReady(false);
     });
 
@@ -166,7 +176,7 @@ export default function App() {
     })
 
     return () => { s_conn.disconnect() }
-  }, [u])
+  }, [])
 
   const attachDataEvents = (chan) => {
     chan.onmessage = (evt) => {
@@ -291,6 +301,20 @@ export default function App() {
     setMsgInput('')
   }
 
+  const handleReport = () => {
+    if (sockt && matchStatus === 'connected') {
+      if (window.confirm("Are you sure you want to report this stranger for inappropriate behavior?")) {
+        sockt.emit('snitch_on_partner');
+      }
+    }
+  }
+
+  const handleLogout = () => {
+    if (window.confirm("Are you sure you want to log out?")) {
+      logOut();
+    }
+  }
+
   const switchMic = async () => {
     if (!localStreamObj.current) {
         await initMedia(camActive, true);
@@ -306,6 +330,16 @@ export default function App() {
   }
 
   const switchCam = async () => {
+    if (!u) {
+      try {
+        await logInWithGoogle();
+        return; 
+      } catch (e) {
+        console.error("Login failed", e);
+        return;
+      }
+    }
+
     if (!localStreamObj.current) {
         await initMedia(true, micActive);
         return;
@@ -372,20 +406,22 @@ export default function App() {
 
   if (loadingAuth) return <LoadingScreen />;
   if (bannedFlg) return <BannedScreen />;
-  if (!u) return <LoginScreen onLogin={logInWithGoogle} />;
 
   return (
     <div className="flex flex-col h-[100dvh] max-h-[100dvh] bg-neutral-950 text-white overflow-hidden">
       <Header 
         user={u} 
-        onLogout={logOut} 
+        onLogout={handleLogout} 
         onNext={clickNext} 
         socketReady={socketReady} 
         matchStatus={matchStatus} 
+        onLogin={logInWithGoogle}
       />
       
       <main className="flex-1 flex flex-col md:flex-row overflow-hidden">
         <VideoSection 
+          user={u}
+          onLogin={logInWithGoogle}
           remoteVidRef={remoteVidRef}
           selfVidRef={selfVidRef}
           matchStatus={matchStatus}
@@ -394,6 +430,7 @@ export default function App() {
           micActive={micActive}
           onSwitchCam={switchCam}
           onSwitchMic={switchMic}
+          onReport={handleReport}
         />
         
         <ChatBox 

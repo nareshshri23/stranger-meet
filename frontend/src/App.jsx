@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { auth, logInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { Analytics } from '@vercel/analytics/react';
 
 import { LoadingScreen, BannedScreen, LoginScreen, LandingScreen } from './components/Screens';
 import Header from './components/Header';
@@ -435,57 +436,75 @@ export default function App() {
   }
 
   if (!hasStarted) {
-    return <LandingScreen onStart={(name) => {
-      setMyNickname(name);
-      myNicknameRef.current = name;
-      setHasStarted(true);
-    }} />
+    return (
+      <>
+        <LandingScreen onStart={(name) => {
+          setMyNickname(name);
+          myNicknameRef.current = name;
+          setHasStarted(true);
+        }} />
+        <Analytics />
+      </>
+    )
   }
 
-  if (loadingAuth) return <LoadingScreen />;
-  if (bannedFlg) return <BannedScreen />;
+  if (loadingAuth) return (
+    <>
+      <LoadingScreen />
+      <Analytics />
+    </>
+  );
+  if (bannedFlg) return (
+    <>
+      <BannedScreen />
+      <Analytics />
+    </>
+  );
 
   return (
-    <div className="flex flex-col h-[100dvh] max-h-[100dvh] bg-neutral-950 text-white overflow-hidden">
-      <Header 
-        user={u} 
-        onLogout={handleLogout} 
-        onNext={clickNext} 
-        socketReady={socketReady} 
-        matchStatus={matchStatus} 
-        onLogin={logInWithGoogle}
-      />
-      
-      <main className="flex-1 flex flex-col xl:flex-row overflow-hidden">
-        <VideoSection 
-          user={u}
+    <>
+      <div className="flex flex-col h-[100dvh] max-h-[100dvh] bg-neutral-950 text-white overflow-hidden">
+        <Header 
+          user={u} 
+          onLogout={handleLogout} 
+          onNext={clickNext} 
+          socketReady={socketReady} 
+          matchStatus={matchStatus} 
           onLogin={logInWithGoogle}
-          remoteVidRef={remoteVidRef}
-          selfVidRef={selfVidRef}
-          matchStatus={matchStatus}
-          strangerNickname={strangerNickname}
-          myNickname={myNickname}
-          strangerCamActive={strangerCamActive}
-          camActive={camActive}
-          micActive={micActive}
-          onSwitchCam={switchCam}
-          onSwitchMic={switchMic}
-          onReport={handleReport}
         />
         
-        <ChatBox 
-          chatLog={chatLog}
-          strangerTyping={strangerTyping}
-          strangerNickname={strangerNickname}
-          matchStatus={matchStatus}
-          msgInput={msgInput}
-          showEmojiPicker={showEmojiPicker}
-          onTyping={handleTyping}
-          onSend={handleSend}
-          onToggleEmoji={() => setShowEmojiPicker(!showEmojiPicker)}
-          onEmojiClick={handleEmojiClick}
-        />
-      </main>
-    </div>
+        <main className="flex-1 flex flex-col xl:flex-row overflow-hidden">
+          <VideoSection 
+            user={u}
+            onLogin={logInWithGoogle}
+            remoteVidRef={remoteVidRef}
+            selfVidRef={selfVidRef}
+            matchStatus={matchStatus}
+            strangerNickname={strangerNickname}
+            myNickname={myNickname}
+            strangerCamActive={strangerCamActive}
+            camActive={camActive}
+            micActive={micActive}
+            onSwitchCam={switchCam}
+            onSwitchMic={switchMic}
+            onReport={handleReport}
+          />
+          
+          <ChatBox 
+            chatLog={chatLog}
+            strangerTyping={strangerTyping}
+            strangerNickname={strangerNickname}
+            matchStatus={matchStatus}
+            msgInput={msgInput}
+            showEmojiPicker={showEmojiPicker}
+            onTyping={handleTyping}
+            onSend={handleSend}
+            onToggleEmoji={() => setShowEmojiPicker(!showEmojiPicker)}
+            onEmojiClick={handleEmojiClick}
+          />
+        </main>
+      </div>
+      <Analytics />
+    </>
   );
 }

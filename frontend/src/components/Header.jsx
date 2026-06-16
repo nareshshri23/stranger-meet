@@ -4,13 +4,16 @@ import { LogOut } from 'lucide-react';
 export default function Header({ user, onLogout, onNext, socketReady, matchStatus, onLogin }) {
   return (
     <header className="p-3 md:p-4 bg-neutral-900 border-b border-neutral-800 flex justify-between items-center shrink-0">
-      <h1 className="text-base md:text-xl font-bold text-blue-500">APARICHAT</h1>
+      <div className="flex items-center gap-2 md:gap-3">
+        <img src="/logo.png" alt="Logo" className="w-10 h-10 md:w-12 md:h-12 object-contain" />
+        <h1 className="text-xl md:text-2xl font-bold text-blue-500">APARICHAT</h1>
+      </div>
       <div className="flex items-center gap-3 md:gap-4">
         <div className="flex items-center gap-2 md:gap-3">
           {user ? (
             <>
               <img src={user.photoURL} alt="pfp" className="hidden md:block w-8 h-8 rounded-full border border-neutral-700" />
-              <button onClick={onLogout} className="text-neutral-400 hover:text-red-400 p-2 md:p-1">
+              <button onClick={onLogout} className="text-neutral-400 hover:text-red-400 p-2 md:p-1" aria-label="Logout">
                 <LogOut className="w-5 h-5" />
               </button>
             </>

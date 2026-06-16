@@ -64,10 +64,10 @@ export default function VideoSection({
         <video ref={selfVidRef} autoPlay playsInline muted className={`w-full h-full object-cover -scale-x-100 ${!camActive ? 'hidden' : ''}`} />
         {!camActive && <div className="absolute inset-0 flex items-center justify-center bg-neutral-800"><User className="w-12 h-12 xl:w-24 xl:h-24 text-neutral-600" /></div>}
         <div className="absolute top-1 right-1 flex flex-col xl:flex-row gap-1 z-10">
-          <button onClick={onSwitchMic} className="bg-neutral-900/80 p-1.5 rounded">
+          <button onClick={onSwitchMic} className="bg-neutral-900/80 p-1.5 rounded" aria-label={micActive ? "Mute Microphone" : "Unmute Microphone"}>
             {micActive ? <Mic className="w-4 h-4 text-white" /> : <MicOff className="w-4 h-4 text-red-500" />}
           </button>
-          <button onClick={onSwitchCam} className="bg-neutral-900/80 p-1.5 rounded">
+          <button onClick={onSwitchCam} className="bg-neutral-900/80 p-1.5 rounded" aria-label={camActive ? "Turn Off Camera" : "Turn On Camera"}>
             {camActive ? <Video className="w-4 h-4 text-white" /> : <VideoOff className="w-4 h-4 text-red-500" />}
           </button>
         </div>

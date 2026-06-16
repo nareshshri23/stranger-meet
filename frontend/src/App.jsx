@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 import { auth, logInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
-import { LoadingScreen, BannedScreen, LoginScreen } from './components/Screens';
+import { LoadingScreen, BannedScreen, LoginScreen, LandingScreen } from './components/Screens';
 import Header from './components/Header';
 import VideoSection from './components/VideoSection';
 import ChatBox from './components/ChatBox';
@@ -23,6 +23,13 @@ export default function App() {
   const [u, setU] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
   const [bannedFlg, setBannedFlg] = useState(false)
+
+  const [hasStarted, setHasStarted] = useState(false)
+  const [myNickname, setMyNickname] = useState('Stranger')
+  const [strangerNickname, setStrangerNickname] = useState('Stranger')
+
+  const myNicknameRef = useRef('Stranger')
+  const strangerNicknameRef = useRef('Stranger')
 
   const [sockt, setSockt] = useState(null)
   const [socketReady, setSocketReady] = useState(false)
@@ -118,12 +125,12 @@ export default function App() {
 
     s_conn.on('waiting', (data) => {
       setMatchStatus('searching')
-      setChatLog([{ sender: 'sys', text: data.message }])
+      setChatLog([{ senderName: 'Sys', text: data.message, isSelf: false, isSys: true }])
     })
 
     s_conn.on('matched', async (data) => {
       setMatchStatus('connected')
-      setChatLog((prev) => [...prev, { sender: 'sys', text: 'Connected! Say hi' }])
+      setChatLog((prev) => [...prev, { senderName: 'Sys', text: 'Connected! Say hi', isSelf: false, isSys: true }])
       initWebRTC(data.createOffer, s_conn)
     })
 
@@ -160,7 +167,7 @@ export default function App() {
       setMatchStatus('idle')
       setStrangerTyping(false)
       setStrangerCamActive(false)
-      setChatLog((prev) => [...prev, { sender: 'sys', text: info.message }])
+      setChatLog((prev) => [...prev, { senderName: 'Sys', text: info.message, isSelf: false, isSys: true }])
       if (remoteVidRef.current) remoteVidRef.current.srcObject = null
       if (pcRef.current) {
         pcRef.current.close()
@@ -184,7 +191,7 @@ export default function App() {
         const data = JSON.parse(evt.data);
         if (data.type === 'msg') {
           setStrangerTyping(false);
-          setChatLog((prev) => [...prev, { sender: 'stranger', text: data.payload }]);
+          setChatLog((prev) => [...prev, { senderName: strangerNicknameRef.current, text: data.payload, isSelf: false, isSys: false }]);
         } else if (data.type === 'typing') {
           setStrangerTyping(true);
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -193,10 +200,13 @@ export default function App() {
           }, 2000);
         } else if (data.type === 'cam_toggle') {
           setStrangerCamActive(data.payload);
+        } else if (data.type === 'nickname') {
+          setStrangerNickname(data.payload);
+          strangerNicknameRef.current = data.payload;
         }
       } catch (e) {
         setStrangerTyping(false);
-        setChatLog((prev) => [...prev, { sender: 'stranger', text: evt.data }]);
+        setChatLog((prev) => [...prev, { senderName: strangerNicknameRef.current, text: evt.data, isSelf: false, isSys: false }]);
       }
     }
   }
@@ -228,6 +238,7 @@ export default function App() {
       
       const handleChannelOpen = () => {
         dChan.send(JSON.stringify({ type: 'cam_toggle', payload: camActiveRef.current }));
+        dChan.send(JSON.stringify({ type: 'nickname', payload: myNicknameRef.current }));
       }
       
       if (dChan.readyState === 'open') {
@@ -243,6 +254,7 @@ export default function App() {
         
         const handleChannelOpen = () => {
           evt.channel.send(JSON.stringify({ type: 'cam_toggle', payload: camActiveRef.current }));
+          evt.channel.send(JSON.stringify({ type: 'nickname', payload: myNicknameRef.current }));
         }
         
         if (evt.channel.readyState === 'open') {
@@ -281,7 +293,9 @@ export default function App() {
       setMatchStatus('searching')
       setStrangerTyping(false)
       setStrangerCamActive(false)
-      setChatLog([{ sender: 'sys', text: 'Finding match...' }])
+      setStrangerNickname('Stranger');
+      strangerNicknameRef.current = 'Stranger';
+      setChatLog([{ senderName: 'Sys', text: 'Finding match...', isSelf: false, isSys: true }])
 
       if (remoteVidRef.current) remoteVidRef.current.srcObject = null
       if (pcRef.current) {
@@ -313,7 +327,7 @@ export default function App() {
     if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
       dataChanRef.current.send(JSON.stringify({ type: 'msg', payload: msgInput }))
     }
-    setChatLog((prev) => [...prev, { sender: 'you', text: msgInput }])
+    setChatLog((prev) => [...prev, { senderName: 'You', text: msgInput, isSelf: true, isSys: false }])
     setMsgInput('')
   }
 
@@ -420,6 +434,14 @@ export default function App() {
     }
   }
 
+  if (!hasStarted) {
+    return <LandingScreen onStart={(name) => {
+      setMyNickname(name);
+      myNicknameRef.current = name;
+      setHasStarted(true);
+    }} />
+  }
+
   if (loadingAuth) return <LoadingScreen />;
   if (bannedFlg) return <BannedScreen />;
 
@@ -441,6 +463,8 @@ export default function App() {
           remoteVidRef={remoteVidRef}
           selfVidRef={selfVidRef}
           matchStatus={matchStatus}
+          strangerNickname={strangerNickname}
+          myNickname={myNickname}
           strangerCamActive={strangerCamActive}
           camActive={camActive}
           micActive={micActive}
@@ -452,6 +476,7 @@ export default function App() {
         <ChatBox 
           chatLog={chatLog}
           strangerTyping={strangerTyping}
+          strangerNickname={strangerNickname}
           matchStatus={matchStatus}
           msgInput={msgInput}
           showEmojiPicker={showEmojiPicker}

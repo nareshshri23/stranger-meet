@@ -7,6 +7,8 @@ export default function VideoSection({
   remoteVidRef,
   selfVidRef,
   matchStatus,
+  strangerNickname,
+  myNickname,
   strangerCamActive,
   camActive,
   micActive,
@@ -51,7 +53,7 @@ export default function VideoSection({
           <div className="absolute inset-0 flex items-center justify-center bg-neutral-800"><User className="w-12 h-12 xl:w-24 xl:h-24 text-neutral-600" /></div>
         )}
 
-        <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-0.5 rounded text-xs z-20">Stranger</div>
+        <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-0.5 rounded text-xs z-20">{strangerNickname || 'Stranger'}</div>
         {matchStatus === 'connected' && (
           <button onClick={onReport} title="Report Stranger" className="absolute top-2 left-2 flex items-center bg-red-600/80 hover:bg-red-500 py-1 px-2 rounded text-white text-xs font-semibold z-20 transition-colors">
             <AlertTriangle className="w-3 h-3 mr-1" />
@@ -70,6 +72,9 @@ export default function VideoSection({
           <button onClick={onSwitchCam} className="bg-neutral-900/80 p-1.5 rounded" aria-label={camActive ? "Turn Off Camera" : "Turn On Camera"}>
             {camActive ? <Video className="w-4 h-4 text-white" /> : <VideoOff className="w-4 h-4 text-red-500" />}
           </button>
+        </div>
+        <div className="absolute bottom-1 left-1 xl:bottom-2 xl:left-2 bg-black/60 px-2 py-0.5 rounded text-[10px] xl:text-xs z-20 text-white">
+          You
         </div>
       </div>
     </div>

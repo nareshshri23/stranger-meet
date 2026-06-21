@@ -46,15 +46,13 @@ export default function App() {
 
   const initMedia = async (reqVideo, reqAudio) => {
       try {
-          let s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+          let constraints = {};
+          if (reqVideo) constraints.video = true;
+          if (reqAudio) constraints.audio = true;
+          
+          let s = await navigator.mediaDevices.getUserMedia(constraints)
           localStreamObj.current = s
           
-          let vTrack = s.getVideoTracks()[0]
-          if (vTrack) vTrack.enabled = reqVideo;
-          
-          let aTrack = s.getAudioTracks()[0]
-          if (aTrack) aTrack.enabled = reqAudio;
-
           if (selfVidRef.current) selfVidRef.current.srcObject = s
           
           setCamActive(reqVideo)
@@ -86,8 +84,8 @@ export default function App() {
               }
           }
       } catch (err) {
-          console.log("cam fail", err)
-          alert("Please allow camera and microphone access.")
+          console.log("media fail", err)
+          alert("Please allow requested device access.")
       }
   }
 
@@ -220,8 +218,9 @@ export default function App() {
         { urls: 'stun:stun.l.google.com:19302' },
         {
           urls: [
-            'turn:free.expressturn.com:3478?transport=udp',
-            'turn:free.expressturn.com:3478?transport=tcp'
+            'turn:openrelay.metered.ca:80',
+            'turn:openrelay.metered.ca:443',
+            'turn:openrelay.metered.ca:443?transport=tcp'
           ],
           username: import.meta.env.VITE_TURN_USERNAME,
           credential: import.meta.env.VITE_TURN_PASSWORD
@@ -350,11 +349,34 @@ export default function App() {
         await initMedia(camActive, true);
         return;
     }
-    if (localStreamObj.current) {
-      let aTrack = localStreamObj.current.getAudioTracks()[0]
-      if (aTrack) {
-        aTrack.enabled = !aTrack.enabled
-        setMicActive(aTrack.enabled)
+    let aTrack = localStreamObj.current.getAudioTracks()[0]
+    if (aTrack) {
+      aTrack.enabled = !aTrack.enabled
+      setMicActive(aTrack.enabled)
+    } else {
+      try {
+        let newStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        let newATrack = newStream.getAudioTracks()[0]
+        localStreamObj.current.addTrack(newATrack)
+
+        if (pcRef.current) {
+          let sender = pcRef.current.getSenders().find(s => s.track && s.track.kind === 'audio')
+          if (sender) sender.replaceTrack(newATrack)
+          else {
+              pcRef.current.addTrack(newATrack, localStreamObj.current)
+              if (sockt) {
+                  pcRef.current.createOffer().then(offer => {
+                      return pcRef.current.setLocalDescription(offer).then(() => {
+                          sockt.emit('send_signal', { sdp: pcRef.current.localDescription });
+                      });
+                  }).catch(e => console.log("reneg err", e));
+              }
+          }
+        }
+        setMicActive(true)
+      } catch (e) {
+        console.log("blocked", e)
+        alert("mic blocked")
       }
     }
   }
@@ -380,7 +402,10 @@ export default function App() {
       let vTrack = localStreamObj.current.getVideoTracks()[0]
       if (vTrack) {
         if (isMobileDev) vTrack.enabled = false
-        else vTrack.stop()
+        else {
+          vTrack.stop()
+          localStreamObj.current.removeTrack(vTrack)
+        }
       }
       setCamActive(false)
       camActiveRef.current = false;
@@ -388,9 +413,9 @@ export default function App() {
         dataChanRef.current.send(JSON.stringify({ type: 'cam_toggle', payload: false }));
       }
     } else {
-      if (isMobileDev) {
-        let vTrack = localStreamObj.current.getVideoTracks()[0]
-        if (vTrack) vTrack.enabled = true
+      let vTrack = localStreamObj.current.getVideoTracks()[0]
+      if (isMobileDev && vTrack) {
+        vTrack.enabled = true
         setCamActive(true)
         camActiveRef.current = true;
         if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
@@ -399,13 +424,13 @@ export default function App() {
       } else {
         try {
           let newStream = await navigator.mediaDevices.getUserMedia({ video: true })
-          let newVTrack = newStream.getVideoTracks()[0]
+        let newVTrack = newStream.getVideoTracks()[0]
 
-          let oldTrack = localStreamObj.current.getVideoTracks()[0]
-          if (oldTrack) localStreamObj.current.removeTrack(oldTrack)
+        let oldTrack = localStreamObj.current.getVideoTracks()[0]
+        if (oldTrack) localStreamObj.current.removeTrack(oldTrack)
 
-          localStreamObj.current.addTrack(newVTrack)
-          if (selfVidRef.current) selfVidRef.current.srcObject = localStreamObj.current
+        localStreamObj.current.addTrack(newVTrack)
+        if (selfVidRef.current) selfVidRef.current.srcObject = localStreamObj.current
 
           if (pcRef.current) {
             let sender = pcRef.current.getSenders().find(s => s.track && s.track.kind === 'video')

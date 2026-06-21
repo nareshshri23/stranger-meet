@@ -22,7 +22,13 @@ export function LandingScreen({ onStart }) {
           {/* Subtle top border glow */}
           <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-50" />
           
-          <div className="space-y-4 md:space-y-6">
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              onStart(name.trim() || 'Stranger');
+            }}
+            className="space-y-4 md:space-y-6"
+          >
             <div>
               <label className="block text-[10px] md:text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2 text-center">Nickname (Optional)</label>
               <input 
@@ -36,12 +42,12 @@ export function LandingScreen({ onStart }) {
             </div>
             
             <button 
-              onClick={() => onStart(name.trim() || 'Stranger')}
+              type="submit"
               className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 md:py-4 px-6 rounded-xl text-base md:text-lg transition-colors flex items-center justify-center gap-2"
             >
               Start Chatting
             </button>
-          </div>
+          </form>
         </div>
 
         {/* Feature Grid */}

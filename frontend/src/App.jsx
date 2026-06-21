@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { auth, logInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { Analytics } from '@vercel/analytics/react';
 
 import { LoadingScreen, BannedScreen, LoginScreen, LandingScreen } from './components/Screens';
 import Header from './components/Header';
@@ -511,6 +512,7 @@ export default function App() {
           onEmojiClick={handleEmojiClick}
         />
       </main>
+      <Analytics />
     </div>
   );
 }

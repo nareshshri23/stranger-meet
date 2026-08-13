@@ -112,8 +112,17 @@ io.on('connection', (socket) => {
             activePairs[socket.id] = { partnerId: peerId, roomId: sessionRoomId };
             activePairs[peerId] = { partnerId: socket.id, roomId: sessionRoomId };
 
-            socket.emit('matched', { roomId: sessionRoomId, createOffer: true });
-            io.to(peerId).emit('matched', { roomId: sessionRoomId, createOffer: false });
+            const turnConfig = {
+                urls: [
+                    process.env.TURN_URL || 'turn:openrelay.metered.ca:80',
+                    process.env.TURN_URL_TCP || 'turn:openrelay.metered.ca:443?transport=tcp'
+                ],
+                username: process.env.TURN_USERNAME || 'openrelayproject',
+                credential: process.env.TURN_PASSWORD || 'openrelayproject'
+            };
+
+            socket.emit('matched', { roomId: sessionRoomId, createOffer: true, turnConfig });
+            io.to(peerId).emit('matched', { roomId: sessionRoomId, createOffer: false, turnConfig });
         }
     });
 

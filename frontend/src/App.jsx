@@ -130,7 +130,7 @@ export default function App() {
     s_conn.on('matched', async (data) => {
       setMatchStatus('connected')
       setChatLog((prev) => [...prev, { senderName: 'Sys', text: 'Connected! Say hi', isSelf: false, isSys: true }])
-      initWebRTC(data.createOffer, s_conn)
+      initWebRTC(data.createOffer, s_conn, data.turnConfig)
     })
 
     s_conn.on('receive_signal', async (info) => {
@@ -210,21 +210,27 @@ export default function App() {
     }
   }
 
-  const initWebRTC = async (isCaller, sockInstance) => {
+  const initWebRTC = async (isCaller, sockInstance, turnConfig) => {
     if (pcRef.current) pcRef.current.close()
     waitQueue.current = []
 
     let rtcConfig = {
       iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        {
+        { 
           urls: [
-            'turn:openrelay.metered.ca:80',
-            'turn:openrelay.metered.ca:443',
-            'turn:openrelay.metered.ca:443?transport=tcp'
+            'stun:stun.l.google.com:19302',
+            'stun:stun1.l.google.com:19302',
+            'stun:stun2.l.google.com:19302',
+            'stun:global.stun.twilio.com:3478'
+          ]
+        },
+        {
+          urls: turnConfig?.urls || [
+            import.meta.env.VITE_TURN_URL || 'turn:openrelay.metered.ca:80',
+            import.meta.env.VITE_TURN_URL_TCP || 'turn:openrelay.metered.ca:443?transport=tcp'
           ],
-          username: import.meta.env.VITE_TURN_USERNAME,
-          credential: import.meta.env.VITE_TURN_PASSWORD
+          username: turnConfig?.username || import.meta.env.VITE_TURN_USERNAME || 'openrelayproject',
+          credential: turnConfig?.credential || import.meta.env.VITE_TURN_PASSWORD || 'openrelayproject'
         }
       ]
     }

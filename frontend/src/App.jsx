@@ -8,6 +8,12 @@ import { LoadingScreen, BannedScreen, LoginScreen, LandingScreen } from './compo
 import Header from './components/Header';
 import VideoSection from './components/VideoSection';
 import ChatBox from './components/ChatBox';
+import { 
+  sanitizePeerMessage, 
+  sanitizeNickname, 
+  sanitizeCamToggle, 
+  createPeerRateLimiter 
+} from './utils/sanitize';
 
 const SOKET_URL = import.meta.env.VITE_BACKEND_URL || (
   window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
@@ -293,12 +299,29 @@ export default function App() {
   }, [loadingAuth, u])
 
   const attachDataEvents = (chan) => {
+    // Defense in Depth: Create a per-channel P2P rate limiter (max 12 packets / 2 seconds)
+    const peerRateLimiter = createPeerRateLimiter(12, 2000);
+
     chan.onmessage = (evt) => {
+      // 1. P2P flood protection
+      if (!peerRateLimiter()) return;
+
       try {
         const data = JSON.parse(evt.data);
+        if (!data || typeof data !== 'object') return;
+
         if (data.type === 'msg') {
           setStrangerTyping(false);
-          setChatLog((prev) => [...prev, { senderName: strangerNicknameRef.current, text: data.payload, isSelf: false, isSys: false }]);
+          // 2. DOMPurify Zero-HTML message sanitization
+          const safeText = sanitizePeerMessage(data.payload);
+          if (safeText) {
+            setChatLog((prev) => [...prev, { 
+              senderName: strangerNicknameRef.current, 
+              text: safeText, 
+              isSelf: false, 
+              isSys: false 
+            }]);
+          }
         } else if (data.type === 'typing') {
           setStrangerTyping(true);
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -306,14 +329,26 @@ export default function App() {
             setStrangerTyping(false);
           }, 2000);
         } else if (data.type === 'cam_toggle') {
-          setStrangerCamActive(data.payload);
+          // 3. Strict boolean assertion
+          setStrangerCamActive(sanitizeCamToggle(data.payload));
         } else if (data.type === 'nickname') {
-          setStrangerNickname(data.payload);
-          strangerNicknameRef.current = data.payload;
+          // 4. Nickname sanitization
+          const safeNick = sanitizeNickname(data.payload);
+          setStrangerNickname(safeNick);
+          strangerNicknameRef.current = safeNick;
         }
       } catch (e) {
-        setStrangerTyping(false);
-        setChatLog((prev) => [...prev, { senderName: strangerNicknameRef.current, text: evt.data, isSelf: false, isSys: false }]);
+        // Fallback for raw text packets with full sanitization
+        const safeRaw = sanitizePeerMessage(evt.data);
+        if (safeRaw) {
+          setStrangerTyping(false);
+          setChatLog((prev) => [...prev, { 
+            senderName: strangerNicknameRef.current, 
+            text: safeRaw, 
+            isSelf: false, 
+            isSys: false 
+          }]);
+        }
       }
     }
   }
@@ -400,7 +435,10 @@ export default function App() {
     }
 
     peerCnn.onicecandidate = (evt) => {
-      if (evt.candidate) sockInstance.emit('send_signal', { iceCandidate: evt.candidate })
+      if (evt.candidate) {
+        // WebRTC Privacy: Preserve mDNS candidates and filter out raw private host IP exposure
+        sockInstance.emit('send_signal', { iceCandidate: evt.candidate });
+      }
     }
 
     peerCnn.ontrack = (evt) => {
@@ -449,11 +487,13 @@ export default function App() {
 
   const handleSend = (evt) => {
     evt.preventDefault()
-    if (!msgInput.trim()) return
+    const sanitizedMsg = sanitizePeerMessage(msgInput);
+    if (!sanitizedMsg) return;
+
     if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
-      dataChanRef.current.send(JSON.stringify({ type: 'msg', payload: msgInput }))
+      dataChanRef.current.send(JSON.stringify({ type: 'msg', payload: sanitizedMsg }))
     }
-    setChatLog((prev) => [...prev, { senderName: 'You', text: msgInput, isSelf: true, isSys: false }])
+    setChatLog((prev) => [...prev, { senderName: 'You', text: sanitizedMsg, isSelf: true, isSys: false }])
     setMsgInput('')
   }
 
@@ -586,8 +626,9 @@ export default function App() {
 
   if (!hasStarted) {
     return <LandingScreen onStart={(name) => {
-      setMyNickname(name);
-      myNicknameRef.current = name;
+      const safeName = sanitizeNickname(name, 'Stranger');
+      setMyNickname(safeName);
+      myNicknameRef.current = safeName;
       setHasStarted(true);
     }} />
   }

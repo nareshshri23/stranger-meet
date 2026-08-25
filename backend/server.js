@@ -59,8 +59,32 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
         "https://aparichat.vercel.app"
       ];
 
+// Strict Origin Validation Function (Rejects wildcard '*' and unknown domains)
+const isAllowedOrigin = (origin) => {
+    if (!origin) return true; // Allow non-browser direct server-to-server healthchecks
+    return allowedOrigins.includes(origin);
+};
+
+// Global API & Server Security Headers Middleware
+app.use((req, res, next) => {
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+    next();
+});
+
+// Strict Express CORS Middleware
 app.use(cors({ 
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+        if (!origin || isAllowedOrigin(origin)) {
+            callback(null, true);
+        } else {
+            console.warn(`[SECURITY] Blocked CORS request from unauthorized origin: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     methods: ["GET", "POST"],
     credentials: true
 }));
@@ -168,9 +192,25 @@ app.get('/api/turn-credentials', async (req, res) => {
 const server = createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: allowedOrigins,
+        origin: (origin, callback) => {
+            if (!origin || isAllowedOrigin(origin)) {
+                callback(null, true);
+            } else {
+                callback(new Error('Origin unauthorized by CORS'));
+            }
+        },
         methods: ["GET", "POST"],
         credentials: true
+    },
+    // Handshake Gate: Drop unauthorized cross-origin WebSocket upgrades before allocating resources
+    allowRequest: (req, callback) => {
+        const origin = req.headers.origin;
+        if (!origin || isAllowedOrigin(origin)) {
+            callback(null, true);
+        } else {
+            console.warn(`[SECURITY] Rejected unauthorized Socket.io handshake from origin: ${origin}`);
+            callback(403, false);
+        }
     },
     pingTimeout: 10000,
     pingInterval: 5000,

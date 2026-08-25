@@ -9,6 +9,7 @@ import Header from './components/Header';
 import VideoSection from './components/VideoSection';
 import ChatBox from './components/ChatBox';
 import MediaErrorModal from './components/MediaErrorModal';
+import NetworkToast from './components/NetworkToast';
 import { 
   sanitizePeerMessage, 
   sanitizeNickname, 
@@ -46,6 +47,12 @@ export default function App() {
   const [sockt, setSockt] = useState(null)
   const [socketReady, setSocketReady] = useState(false)
   const [matchStatus, setMatchStatus] = useState('idle')
+  const [icePhase, setIcePhase] = useState('idle') // 'idle' | 'searching' | 'securing' | 'probing' | 'connected'
+  const icePhaseRef = useRef('idle')
+
+  const [networkToast, setNetworkToast] = useState(null)
+  const networkToastTimer = useRef(null)
+
   const [isPartnerReconnecting, setIsPartnerReconnecting] = useState(false)
   const [isStrangerBackgrounded, setIsStrangerBackgrounded] = useState(false)
   const [mediaError, setMediaError] = useState(null)
@@ -68,6 +75,16 @@ export default function App() {
   let dataChanRef = useRef(null)
   let waitQueue = useRef([])
   let typingTimeoutRef = useRef(null)
+
+  const showNetworkToast = (message, type = 'info', duration = 4000) => {
+    if (networkToastTimer.current) clearTimeout(networkToastTimer.current);
+    setNetworkToast({ message, type });
+    if (duration > 0) {
+      networkToastTimer.current = setTimeout(() => {
+        setNetworkToast(null);
+      }, duration);
+    }
+  };
 
   /**
    * Complete hardware teardown to guarantee webcams/microphones turn OFF
@@ -106,6 +123,7 @@ export default function App() {
         pcRef.current.ontrack = null;
         pcRef.current.onicecandidate = null;
         pcRef.current.ondatachannel = null;
+        pcRef.current.oniceconnectionstatechange = null;
         pcRef.current.close();
       } catch (_) {}
       pcRef.current = null;
@@ -245,8 +263,15 @@ export default function App() {
     })
     setSockt(s_conn)
 
-    s_conn.on('connect', () => { setSocketReady(true) })
-    s_conn.on('disconnect', () => { setSocketReady(false) })
+    s_conn.on('connect', () => { 
+      setSocketReady(true);
+      setNetworkToast(prev => prev?.type === 'error' ? null : prev);
+    })
+    
+    s_conn.on('disconnect', () => { 
+      setSocketReady(false);
+      showNetworkToast("Signaling connection lost. Reconnecting to server...", "error", 0);
+    })
 
     s_conn.on('connect_error', (err) => {
       console.error("rejected by srvr:", err.message);
@@ -260,6 +285,8 @@ export default function App() {
       setIsPartnerReconnecting(false)
       setIsStrangerBackgrounded(false)
       setMatchStatus('searching')
+      setIcePhase('searching')
+      icePhaseRef.current = 'searching'
       setChatLog([{ senderName: 'Sys', text: data.message, isSelf: false, isSys: true }])
     })
 
@@ -267,6 +294,8 @@ export default function App() {
       setIsPartnerReconnecting(false)
       setIsStrangerBackgrounded(false)
       setMatchStatus('connected')
+      setIcePhase('securing')
+      icePhaseRef.current = 'securing'
       setChatLog((prev) => [...prev, { senderName: 'Sys', text: 'Connected! Say hi', isSelf: false, isSys: true }])
       initWebRTC(data.createOffer, s_conn, data.iceServers)
     })
@@ -279,6 +308,7 @@ export default function App() {
 
     s_conn.on('session_recovered', async (data) => {
       setIsPartnerReconnecting(false)
+      showNetworkToast("⚡ Reconnected with stranger!", "success", 3000)
       setChatLog((prev) => [...prev, { senderName: 'Sys', text: '⚡ Reconnected with stranger!', isSelf: false, isSys: true }])
       
       // Perform seamless ICE restart
@@ -331,6 +361,8 @@ export default function App() {
       setIsPartnerReconnecting(false)
       setIsStrangerBackgrounded(false)
       setMatchStatus('idle')
+      setIcePhase('idle')
+      icePhaseRef.current = 'idle'
       setStrangerTyping(false)
       setStrangerCamActive(false)
       setChatLog((prev) => [...prev, { senderName: 'Sys', text: info.message, isSelf: false, isSys: true }])
@@ -341,6 +373,8 @@ export default function App() {
       setIsPartnerReconnecting(false)
       setIsStrangerBackgrounded(false)
       setBannedFlg(true)
+      setIcePhase('idle')
+      icePhaseRef.current = 'idle'
       stopAllMediaTracks()
       destroyPeerConnection()
     })
@@ -444,12 +478,22 @@ export default function App() {
     const peerCnn = new RTCPeerConnection(rtcConfig)
     pcRef.current = peerCnn
 
-    // Monitor WebRTC ICE Connection State for network drop recovery
+    // Stale-closure-free WebRTC event monitoring with functional state updates
     peerCnn.oniceconnectionstatechange = () => {
-      if (peerCnn.iceConnectionState === 'disconnected') {
-        console.warn("[WebRTC] ICE Connection Disconnected. Attempting automatic recovery...");
-      } else if (peerCnn.iceConnectionState === 'failed') {
+      const state = peerCnn.iceConnectionState;
+      if (state === 'checking') {
+        setIcePhase(prev => (prev !== 'connected' ? 'probing' : prev));
+        icePhaseRef.current = 'probing';
+      } else if (state === 'connected' || state === 'completed') {
+        setIcePhase('connected');
+        icePhaseRef.current = 'connected';
+        showNetworkToast("Video stream connected!", "success", 2500);
+      } else if (state === 'disconnected') {
+        console.warn("[WebRTC] ICE Disconnected. Network switch detected.");
+        showNetworkToast("Network route changed (Wi-Fi/4G). Reconnecting video...", "warning", 6000);
+      } else if (state === 'failed') {
         console.warn("[WebRTC] ICE Connection Failed. Requesting ICE Restart...");
+        showNetworkToast("Network path failed. Negotiating new route...", "warning", 6000);
         try {
           peerCnn.restartIce();
         } catch (_) {}
@@ -520,6 +564,8 @@ export default function App() {
       setIsPartnerReconnecting(false)
       setIsStrangerBackgrounded(false)
       setMatchStatus('searching')
+      setIcePhase('searching')
+      icePhaseRef.current = 'searching'
       setStrangerTyping(false)
       setStrangerCamActive(false)
       setStrangerNickname('Stranger');
@@ -725,6 +771,9 @@ export default function App() {
           remoteVidRef={remoteVidRef}
           selfVidRef={selfVidRef}
           matchStatus={matchStatus}
+          icePhase={icePhase}
+          mediaError={mediaError}
+          onOpenPermissionsGuide={() => setMediaError('NotAllowedError')}
           strangerNickname={strangerNickname}
           myNickname={myNickname}
           strangerCamActive={strangerCamActive}
@@ -756,6 +805,8 @@ export default function App() {
         onRetry={() => initMedia(camActiveRef.current, micActive)} 
         onContinueTextOnly={() => setMediaError(null)} 
       />
+
+      <NetworkToast toast={networkToast} />
 
       <Analytics />
     </div>

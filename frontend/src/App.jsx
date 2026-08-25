@@ -8,6 +8,7 @@ import { LoadingScreen, BannedScreen, LoginScreen, LandingScreen } from './compo
 import Header from './components/Header';
 import VideoSection from './components/VideoSection';
 import ChatBox from './components/ChatBox';
+import MediaErrorModal from './components/MediaErrorModal';
 import { 
   sanitizePeerMessage, 
   sanitizeNickname, 
@@ -46,6 +47,9 @@ export default function App() {
   const [socketReady, setSocketReady] = useState(false)
   const [matchStatus, setMatchStatus] = useState('idle')
   const [isPartnerReconnecting, setIsPartnerReconnecting] = useState(false)
+  const [isStrangerBackgrounded, setIsStrangerBackgrounded] = useState(false)
+  const [mediaError, setMediaError] = useState(null)
+
   const [chatLog, setChatLog] = useState([])
   const [msgInput, setMsgInput] = useState('')
   const [strangerTyping, setStrangerTyping] = useState(false)
@@ -115,17 +119,31 @@ export default function App() {
   const initMedia = async (reqVideo, reqAudio) => {
       try {
           let constraints = {};
-          if (reqVideo) constraints.video = true;
+          if (reqVideo) constraints.video = { width: { ideal: 1280 }, height: { ideal: 720 } };
           if (reqAudio) constraints.audio = true;
           
-          let s = await navigator.mediaDevices.getUserMedia(constraints)
-          localStreamObj.current = s
+          let s;
+          try {
+            s = await navigator.mediaDevices.getUserMedia(constraints);
+          } catch (firstErr) {
+            // Automatic graceful fallback for OverconstrainedError on older hardware
+            if (firstErr.name === 'OverconstrainedError') {
+              s = await navigator.mediaDevices.getUserMedia({
+                video: reqVideo ? true : false,
+                audio: reqAudio ? true : false
+              });
+            } else {
+              throw firstErr;
+            }
+          }
+
+          localStreamObj.current = s;
+          if (selfVidRef.current) selfVidRef.current.srcObject = s;
           
-          if (selfVidRef.current) selfVidRef.current.srcObject = s
-          
-          setCamActive(reqVideo)
-          camActiveRef.current = reqVideo
-          setMicActive(reqAudio)
+          setCamActive(reqVideo);
+          camActiveRef.current = reqVideo;
+          setMicActive(reqAudio);
+          setMediaError(null);
 
           if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
               dataChanRef.current.send(JSON.stringify({ type: 'cam_toggle', payload: reqVideo }));
@@ -152,8 +170,8 @@ export default function App() {
               }
           }
       } catch (err) {
-          console.log("media fail", err)
-          alert("Please allow requested device access.")
+          console.warn("[HARDWARE ERROR] getUserMedia failed:", err.name, err.message);
+          setMediaError(err.name || 'Error');
       }
   }
 
@@ -168,6 +186,38 @@ export default function App() {
     return () => {
       window.removeEventListener('beforeunload', handleUnload);
       window.removeEventListener('pagehide', handleUnload);
+    };
+  }, []);
+
+  // Mobile Background Throttling & Visibility Recovery
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      const isHidden = document.hidden;
+      
+      // 1. Preserve Mobile Battery and Prevent iOS WebRTC Crashes
+      if (localStreamObj.current) {
+        localStreamObj.current.getVideoTracks().forEach(track => {
+          track.enabled = isHidden ? false : camActiveRef.current;
+        });
+      }
+
+      // 2. Notify Peer via DataChannel
+      if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
+        dataChanRef.current.send(JSON.stringify({ type: 'app_backgrounded', payload: isHidden }));
+      }
+
+      // 3. WebRTC Stalled State Recovery upon Returning
+      if (!isHidden && pcRef.current) {
+        if (pcRef.current.iceConnectionState === 'disconnected' || pcRef.current.iceConnectionState === 'failed') {
+          console.log("[LIFECYCLE] App restored from background. Triggering WebRTC ICE recovery...");
+          try { pcRef.current.restartIce(); } catch (_) {}
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 
@@ -208,12 +258,14 @@ export default function App() {
 
     s_conn.on('waiting', (data) => {
       setIsPartnerReconnecting(false)
+      setIsStrangerBackgrounded(false)
       setMatchStatus('searching')
       setChatLog([{ senderName: 'Sys', text: data.message, isSelf: false, isSys: true }])
     })
 
     s_conn.on('matched', async (data) => {
       setIsPartnerReconnecting(false)
+      setIsStrangerBackgrounded(false)
       setMatchStatus('connected')
       setChatLog((prev) => [...prev, { senderName: 'Sys', text: 'Connected! Say hi', isSelf: false, isSys: true }])
       initWebRTC(data.createOffer, s_conn, data.iceServers)
@@ -277,6 +329,7 @@ export default function App() {
 
     s_conn.on('partner_disconnected', (info) => {
       setIsPartnerReconnecting(false)
+      setIsStrangerBackgrounded(false)
       setMatchStatus('idle')
       setStrangerTyping(false)
       setStrangerCamActive(false)
@@ -286,6 +339,7 @@ export default function App() {
 
     s_conn.on('you_got_banned', () => {
       setIsPartnerReconnecting(false)
+      setIsStrangerBackgrounded(false)
       setBannedFlg(true)
       stopAllMediaTracks()
       destroyPeerConnection()
@@ -336,6 +390,9 @@ export default function App() {
           const safeNick = sanitizeNickname(data.payload);
           setStrangerNickname(safeNick);
           strangerNicknameRef.current = safeNick;
+        } else if (data.type === 'app_backgrounded') {
+          // 5. Mobile lifecycle background notification
+          setIsStrangerBackgrounded(data.payload === true);
         }
       } catch (e) {
         // Fallback for raw text packets with full sanitization
@@ -461,6 +518,7 @@ export default function App() {
   const clickNext = () => {
     if (sockt) {
       setIsPartnerReconnecting(false)
+      setIsStrangerBackgrounded(false)
       setMatchStatus('searching')
       setStrangerTyping(false)
       setStrangerCamActive(false)
@@ -543,9 +601,10 @@ export default function App() {
           }
         }
         setMicActive(true)
+        setMediaError(null);
       } catch (e) {
-        console.log("blocked", e)
-        alert("mic blocked")
+        console.warn("[HARDWARE ERROR] switchMic failed:", e.name, e.message);
+        setMediaError(e.name || 'Error');
       }
     }
   }
@@ -586,9 +645,20 @@ export default function App() {
       }
     } else {
       try {
-        let newStream = await navigator.mediaDevices.getUserMedia({ video: true })
-        let newVTrack = newStream.getVideoTracks()[0]
+        let newStream;
+        try {
+          newStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { width: { ideal: 1280 }, height: { ideal: 720 } } 
+          });
+        } catch (firstErr) {
+          if (firstErr.name === 'OverconstrainedError') {
+            newStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          } else {
+            throw firstErr;
+          }
+        }
 
+        let newVTrack = newStream.getVideoTracks()[0]
         let oldTrack = localStreamObj.current.getVideoTracks()[0]
         if (oldTrack) {
           oldTrack.stop();
@@ -614,12 +684,13 @@ export default function App() {
         }
         setCamActive(true)
         camActiveRef.current = true;
+        setMediaError(null);
         if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
           dataChanRef.current.send(JSON.stringify({ type: 'cam_toggle', payload: true }));
         }
       } catch (e) {
-        console.log("blocked", e)
-        alert("cam blocked")
+        console.warn("[HARDWARE ERROR] switchCam failed:", e.name, e.message);
+        setMediaError(e.name || 'Error');
       }
     }
   }
@@ -660,6 +731,7 @@ export default function App() {
           camActive={camActive}
           micActive={micActive}
           isPartnerReconnecting={isPartnerReconnecting}
+          isStrangerBackgrounded={isStrangerBackgrounded}
           onSwitchCam={switchCam}
           onSwitchMic={switchMic}
           onReport={handleReport}
@@ -678,6 +750,13 @@ export default function App() {
           onEmojiClick={handleEmojiClick}
         />
       </main>
+
+      <MediaErrorModal 
+        errorType={mediaError} 
+        onRetry={() => initMedia(camActiveRef.current, micActive)} 
+        onContinueTextOnly={() => setMediaError(null)} 
+      />
+
       <Analytics />
     </div>
   );

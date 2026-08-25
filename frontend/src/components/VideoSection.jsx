@@ -13,6 +13,7 @@ export default function VideoSection({
   camActive,
   micActive,
   isPartnerReconnecting,
+  isStrangerBackgrounded,
   onSwitchCam,
   onSwitchMic,
   onReport
@@ -29,6 +30,15 @@ export default function VideoSection({
             <div className="w-9 h-9 rounded-full border-3 border-amber-500 border-t-transparent animate-spin mb-3" />
             <p className="text-sm md:text-base font-bold text-amber-400">Stranger is reconnecting...</p>
             <p className="text-xs text-neutral-400 mt-1">Network switched or recovering connection</p>
+          </div>
+        )}
+
+        {!isPartnerReconnecting && isStrangerBackgrounded && matchStatus === 'connected' && strangerCamActive && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-xs text-center p-4">
+            <div className="bg-neutral-900/90 border border-amber-500/40 rounded-full px-4 py-1.5 flex items-center gap-2 shadow-xl">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+              <p className="text-xs md:text-sm font-semibold text-amber-300">Stranger minimized the app</p>
+            </div>
           </div>
         )}
 

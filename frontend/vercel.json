@@ -5,7 +5,11 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://apis.google.com https://*.firebaseapp.com https://va.vercel-scripts.com https://*.vercel-scripts.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://stranger-meet-api.onrender.com wss://stranger-meet-api.onrender.com https://*.metered.ca wss://*.metered.ca http://localhost:5000 ws://localhost:5000; media-src 'self' blob: mediastream:; img-src 'self' data: https://*.googleusercontent.com https://aparichat.app https://www.aparichat.app; frame-src https://*.firebaseapp.com https://accounts.google.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://apis.google.com https://*.firebaseapp.com https://va.vercel-scripts.com https://*.vercel-scripts.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://stranger-meet-api.onrender.com wss://stranger-meet-api.onrender.com https://*.metered.ca wss://*.metered.ca http://localhost:5000 ws://localhost:5000; media-src 'self' blob: mediastream:; img-src 'self' data: https://*.googleusercontent.com https://aparichat.app https://www.aparichat.app; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://aparichat.app https://www.aparichat.app; frame-ancestors 'self' https://aparichat.app https://www.aparichat.app https://*.firebaseapp.com; object-src 'none'; base-uri 'self';"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin-allow-popups"
         },
         {
           "key": "Permissions-Policy",
@@ -13,7 +17,7 @@
         },
         {
           "key": "X-Frame-Options",
-          "value": "DENY"
+          "value": "SAMEORIGIN"
         },
         {
           "key": "X-Content-Type-Options",

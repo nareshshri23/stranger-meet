@@ -214,8 +214,26 @@ const io = new Server(server, {
     },
     pingTimeout: 10000,
     pingInterval: 5000,
-    maxHttpBufferSize: 1e6 // Max 1MB packet size limit
 });
+
+// Cross-Instance Signaling Adapter for Multi-Core / Multi-Server Scaling (Render & PM2)
+if (process.env.REDIS_URL) {
+    try {
+        const { createClient } = await import('redis');
+        const { createAdapter } = await import('@socket.io/redis-adapter');
+        
+        const pubClient = createClient({ url: process.env.REDIS_URL });
+        const subClient = pubClient.duplicate();
+
+        await Promise.all([pubClient.connect(), subClient.connect()]);
+        io.adapter(createAdapter(pubClient, subClient));
+        console.log("Redis Pub/Sub adapter connected successfully for multi-core/cross-instance signaling.");
+    } catch (err) {
+        console.warn("Failed to initialize Redis adapter, falling back to standalone in-memory mode:", err.message);
+    }
+} else {
+    console.log("Running in standalone in-memory signaling mode (REDIS_URL not set).");
+}
 
 let standbyQueue = [];
 let activePairs = {};

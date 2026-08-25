@@ -1,3 +1,4 @@
 User-agent: *
 Allow: /
-Sitemap: https://aparichat.com/sitemap.xml
+
+Sitemap: https://aparichat.app/sitemap.xml

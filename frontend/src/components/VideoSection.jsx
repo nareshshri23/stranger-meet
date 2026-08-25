@@ -12,6 +12,7 @@ export default function VideoSection({
   strangerCamActive,
   camActive,
   micActive,
+  isPartnerReconnecting,
   onSwitchCam,
   onSwitchMic,
   onReport
@@ -22,6 +23,14 @@ export default function VideoSection({
     <div className="relative w-full h-[40vh] xl:h-auto xl:flex-1 flex xl:flex-row gap-2 p-2 bg-neutral-900 shrink-0">
       <div className="w-full h-full xl:w-1/2 bg-black rounded-lg overflow-hidden border border-neutral-800 relative flex items-center justify-center">
         <video ref={remoteVidRef} autoPlay playsInline className={`w-full h-full object-cover ${(!strangerCamActive || matchStatus !== 'connected') ? 'hidden' : ''} ${showStrangerBlur ? 'blur-2xl scale-110' : ''}`} />
+
+        {isPartnerReconnecting && matchStatus === 'connected' && (
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/75 backdrop-blur-sm text-center p-4">
+            <div className="w-9 h-9 rounded-full border-3 border-amber-500 border-t-transparent animate-spin mb-3" />
+            <p className="text-sm md:text-base font-bold text-amber-400">Stranger is reconnecting...</p>
+            <p className="text-xs text-neutral-400 mt-1">Network switched or recovering connection</p>
+          </div>
+        )}
 
         {showStrangerBlur && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/40 text-center p-4">

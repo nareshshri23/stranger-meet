@@ -39,6 +39,7 @@ export default function App() {
   const [sockt, setSockt] = useState(null)
   const [socketReady, setSocketReady] = useState(false)
   const [matchStatus, setMatchStatus] = useState('idle')
+  const [isPartnerReconnecting, setIsPartnerReconnecting] = useState(false)
   const [chatLog, setChatLog] = useState([])
   const [msgInput, setMsgInput] = useState('')
   const [strangerTyping, setStrangerTyping] = useState(false)
@@ -48,6 +49,62 @@ export default function App() {
   const [camActive, setCamActive] = useState(false)
   const [micActive, setMicActive] = useState(false)
   const camActiveRef = useRef(false)
+
+  const selfVidRef = useRef(null)
+  const remoteVidRef = useRef(null)
+  const localStreamObj = useRef(null)
+
+  let pcRef = useRef(null)
+  let dataChanRef = useRef(null)
+  let waitQueue = useRef([])
+  let typingTimeoutRef = useRef(null)
+
+  /**
+   * Complete hardware teardown to guarantee webcams/microphones turn OFF
+   */
+  const stopAllMediaTracks = () => {
+    if (localStreamObj.current) {
+      localStreamObj.current.getTracks().forEach(track => {
+        try {
+          track.stop();
+        } catch (_) {}
+      });
+      localStreamObj.current = null;
+    }
+    if (selfVidRef.current) {
+      selfVidRef.current.srcObject = null;
+    }
+    setCamActive(false);
+    camActiveRef.current = false;
+    setMicActive(false);
+  }
+
+  /**
+   * Complete WebRTC PeerConnection and DataChannel disposal
+   */
+  const destroyPeerConnection = () => {
+    if (dataChanRef.current) {
+      try {
+        dataChanRef.current.onmessage = null;
+        dataChanRef.current.onopen = null;
+        dataChanRef.current.close();
+      } catch (_) {}
+      dataChanRef.current = null;
+    }
+    if (pcRef.current) {
+      try {
+        pcRef.current.ontrack = null;
+        pcRef.current.onicecandidate = null;
+        pcRef.current.ondatachannel = null;
+        pcRef.current.close();
+      } catch (_) {}
+      pcRef.current = null;
+    }
+    if (remoteVidRef.current) {
+      remoteVidRef.current.srcObject = null;
+    }
+    waitQueue.current = [];
+  }
 
   const initMedia = async (reqVideo, reqAudio) => {
       try {
@@ -94,14 +151,19 @@ export default function App() {
       }
   }
 
-  const selfVidRef = useRef(null)
-  const remoteVidRef = useRef(null)
-  const localStreamObj = useRef(null)
-
-  let pcRef = useRef(null)
-  let dataChanRef = useRef(null)
-  let waitQueue = useRef([])
-  let typingTimeoutRef = useRef(null)
+  // Cleanup on tab close / browser navigation
+  useEffect(() => {
+    const handleUnload = () => {
+      stopAllMediaTracks();
+      destroyPeerConnection();
+    };
+    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handleUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleUnload);
+      window.removeEventListener('pagehide', handleUnload);
+    };
+  }, []);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (usr) => {
@@ -119,7 +181,12 @@ export default function App() {
       authPayload.email = u.email;
     }
 
-    let s_conn = io(SOKET_URL, { auth: authPayload })
+    let s_conn = io(SOKET_URL, { 
+      auth: authPayload,
+      reconnection: true,
+      reconnectionAttempts: 15,
+      reconnectionDelay: 1000
+    })
     setSockt(s_conn)
 
     s_conn.on('connect', () => { setSocketReady(true) })
@@ -134,14 +201,43 @@ export default function App() {
     });
 
     s_conn.on('waiting', (data) => {
+      setIsPartnerReconnecting(false)
       setMatchStatus('searching')
       setChatLog([{ senderName: 'Sys', text: data.message, isSelf: false, isSys: true }])
     })
 
     s_conn.on('matched', async (data) => {
+      setIsPartnerReconnecting(false)
       setMatchStatus('connected')
       setChatLog((prev) => [...prev, { senderName: 'Sys', text: 'Connected! Say hi', isSelf: false, isSys: true }])
-      initWebRTC(data.createOffer, s_conn, data.turnConfig)
+      initWebRTC(data.createOffer, s_conn, data.iceServers)
+    })
+
+    // Edge Case 2: Graceful "Tunnel Drop" Reconnect Handling
+    s_conn.on('partner_reconnecting', (data) => {
+      setIsPartnerReconnecting(true)
+      setChatLog((prev) => [...prev, { senderName: 'Sys', text: data.message || 'Stranger network switched. Reconnecting...', isSelf: false, isSys: true }])
+    })
+
+    s_conn.on('session_recovered', async (data) => {
+      setIsPartnerReconnecting(false)
+      setChatLog((prev) => [...prev, { senderName: 'Sys', text: '⚡ Reconnected with stranger!', isSelf: false, isSys: true }])
+      
+      // Perform seamless ICE restart
+      if (pcRef.current) {
+        try {
+          if (data.isCaller) {
+            pcRef.current.restartIce()
+            const offer = await pcRef.current.createOffer({ iceRestart: true })
+            await pcRef.current.setLocalDescription(offer)
+            s_conn.emit('send_signal', { sdp: pcRef.current.localDescription })
+          }
+        } catch (e) {
+          initWebRTC(data.isCaller, s_conn, data.iceServers)
+        }
+      } else {
+        initWebRTC(data.isCaller, s_conn, data.iceServers)
+      }
     })
 
     s_conn.on('receive_signal', async (info) => {
@@ -174,25 +270,26 @@ export default function App() {
     })
 
     s_conn.on('partner_disconnected', (info) => {
+      setIsPartnerReconnecting(false)
       setMatchStatus('idle')
       setStrangerTyping(false)
       setStrangerCamActive(false)
       setChatLog((prev) => [...prev, { senderName: 'Sys', text: info.message, isSelf: false, isSys: true }])
-      if (remoteVidRef.current) remoteVidRef.current.srcObject = null
-      if (pcRef.current) {
-        pcRef.current.close()
-        pcRef.current = null
-      }
-      dataChanRef.current = null
-      waitQueue.current = []
+      destroyPeerConnection()
     })
 
     s_conn.on('you_got_banned', () => {
+      setIsPartnerReconnecting(false)
       setBannedFlg(true)
-      if (localStreamObj.current) localStreamObj.current.getTracks().forEach(t => t.stop())
+      stopAllMediaTracks()
+      destroyPeerConnection()
     })
 
-    return () => { s_conn.disconnect() }
+    return () => { 
+      stopAllMediaTracks()
+      destroyPeerConnection()
+      s_conn.disconnect() 
+    }
   }, [loadingAuth, u])
 
   const attachDataEvents = (chan) => {
@@ -221,33 +318,51 @@ export default function App() {
     }
   }
 
-  const initWebRTC = async (isCaller, sockInstance, turnConfig) => {
-    if (pcRef.current) pcRef.current.close()
-    waitQueue.current = []
+  const initWebRTC = async (isCaller, sockInstance, dynamicIceServers) => {
+    destroyPeerConnection();
 
-    let rtcConfig = {
-      iceServers: [
-        { 
-          urls: [
-            'stun:stun.l.google.com:19302',
-            'stun:stun1.l.google.com:19302',
-            'stun:stun2.l.google.com:19302',
-            'stun:global.stun.twilio.com:3478'
-          ]
-        },
-        {
-          urls: turnConfig?.urls || [
-            import.meta.env.VITE_TURN_URL || 'turn:openrelay.metered.ca:80',
-            import.meta.env.VITE_TURN_URL_TCP || 'turn:openrelay.metered.ca:443?transport=tcp'
-          ],
-          username: turnConfig?.username || import.meta.env.VITE_TURN_USERNAME || 'openrelayproject',
-          credential: turnConfig?.credential || import.meta.env.VITE_TURN_PASSWORD || 'openrelayproject'
-        }
-      ]
-    }
+    // High availability STUN + TURN servers fallback
+    const defaultIceServers = [
+      { 
+        urls: [
+          'stun:stun.l.google.com:19302',
+          'stun:stun1.l.google.com:19302',
+          'stun:stun2.l.google.com:19302',
+          'stun:stun.cloudflare.com:3478',
+          'stun:global.stun.twilio.com:3478'
+        ]
+      },
+      {
+        urls: [
+          import.meta.env.VITE_TURN_URL || 'turn:openrelay.metered.ca:80',
+          import.meta.env.VITE_TURN_URL_TCP || 'turn:openrelay.metered.ca:443?transport=tcp',
+          'turns:openrelay.metered.ca:443?transport=tcp',
+          'turns:openrelay.metered.ca:5349?transport=tcp'
+        ],
+        username: import.meta.env.VITE_TURN_USERNAME || 'openrelayproject',
+        credential: import.meta.env.VITE_TURN_PASSWORD || 'openrelayproject'
+      }
+    ];
+
+    const rtcConfig = {
+      iceServers: dynamicIceServers || defaultIceServers,
+      iceCandidatePoolSize: 10
+    };
 
     const peerCnn = new RTCPeerConnection(rtcConfig)
     pcRef.current = peerCnn
+
+    // Monitor WebRTC ICE Connection State for network drop recovery
+    peerCnn.oniceconnectionstatechange = () => {
+      if (peerCnn.iceConnectionState === 'disconnected') {
+        console.warn("[WebRTC] ICE Connection Disconnected. Attempting automatic recovery...");
+      } else if (peerCnn.iceConnectionState === 'failed') {
+        console.warn("[WebRTC] ICE Connection Failed. Requesting ICE Restart...");
+        try {
+          peerCnn.restartIce();
+        } catch (_) {}
+      }
+    };
 
     if (isCaller) {
       let dChan = peerCnn.createDataChannel('chat')
@@ -307,6 +422,7 @@ export default function App() {
 
   const clickNext = () => {
     if (sockt) {
+      setIsPartnerReconnecting(false)
       setMatchStatus('searching')
       setStrangerTyping(false)
       setStrangerCamActive(false)
@@ -314,14 +430,7 @@ export default function App() {
       strangerNicknameRef.current = 'Stranger';
       setChatLog([{ senderName: 'Sys', text: 'Finding match...', isSelf: false, isSys: true }])
 
-      if (remoteVidRef.current) remoteVidRef.current.srcObject = null
-      if (pcRef.current) {
-        pcRef.current.close()
-        pcRef.current = null
-      }
-      dataChanRef.current = null
-      waitQueue.current = []
-
+      destroyPeerConnection()
       sockt.emit('find_partner')
     }
   }
@@ -358,6 +467,8 @@ export default function App() {
 
   const handleLogout = () => {
     if (window.confirm("Are you sure you want to log out?")) {
+      stopAllMediaTracks();
+      destroyPeerConnection();
       logOut();
     }
   }
@@ -414,15 +525,18 @@ export default function App() {
         await initMedia(true, micActive);
         return;
     }
-    let isMobileDev = /Mobi|Android/i.test(navigator.userAgent)
 
     if (camActive) {
+      // Cleanly stop video hardware sensor so device camera LED turns completely off
       let vTrack = localStreamObj.current.getVideoTracks()[0]
       if (vTrack) {
-        if (isMobileDev) vTrack.enabled = false
-        else {
-          vTrack.stop()
-          localStreamObj.current.removeTrack(vTrack)
+        vTrack.stop();
+        localStreamObj.current.removeTrack(vTrack);
+      }
+      if (pcRef.current) {
+        let sender = pcRef.current.getSenders().find(s => s.track && s.track.kind === 'video');
+        if (sender) {
+          try { sender.replaceTrack(null); } catch (_) {}
         }
       }
       setCamActive(false)
@@ -431,48 +545,41 @@ export default function App() {
         dataChanRef.current.send(JSON.stringify({ type: 'cam_toggle', payload: false }));
       }
     } else {
-      let vTrack = localStreamObj.current.getVideoTracks()[0]
-      if (isMobileDev && vTrack) {
-        vTrack.enabled = true
+      try {
+        let newStream = await navigator.mediaDevices.getUserMedia({ video: true })
+        let newVTrack = newStream.getVideoTracks()[0]
+
+        let oldTrack = localStreamObj.current.getVideoTracks()[0]
+        if (oldTrack) {
+          oldTrack.stop();
+          localStreamObj.current.removeTrack(oldTrack);
+        }
+
+        localStreamObj.current.addTrack(newVTrack)
+        if (selfVidRef.current) selfVidRef.current.srcObject = localStreamObj.current
+
+        if (pcRef.current) {
+          let sender = pcRef.current.getSenders().find(s => s.track && s.track.kind === 'video')
+          if (sender) sender.replaceTrack(newVTrack)
+          else {
+              pcRef.current.addTrack(newVTrack, localStreamObj.current)
+              if (sockt) {
+                  pcRef.current.createOffer().then(offer => {
+                      return pcRef.current.setLocalDescription(offer).then(() => {
+                          sockt.emit('send_signal', { sdp: pcRef.current.localDescription });
+                      });
+                  }).catch(e => console.log("reneg err", e));
+              }
+          }
+        }
         setCamActive(true)
         camActiveRef.current = true;
         if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
           dataChanRef.current.send(JSON.stringify({ type: 'cam_toggle', payload: true }));
         }
-      } else {
-        try {
-          let newStream = await navigator.mediaDevices.getUserMedia({ video: true })
-        let newVTrack = newStream.getVideoTracks()[0]
-
-        let oldTrack = localStreamObj.current.getVideoTracks()[0]
-        if (oldTrack) localStreamObj.current.removeTrack(oldTrack)
-
-        localStreamObj.current.addTrack(newVTrack)
-        if (selfVidRef.current) selfVidRef.current.srcObject = localStreamObj.current
-
-          if (pcRef.current) {
-            let sender = pcRef.current.getSenders().find(s => s.track && s.track.kind === 'video')
-            if (sender) sender.replaceTrack(newVTrack)
-            else {
-                pcRef.current.addTrack(newVTrack, localStreamObj.current)
-                if (sockt) {
-                    pcRef.current.createOffer().then(offer => {
-                        return pcRef.current.setLocalDescription(offer).then(() => {
-                            sockt.emit('send_signal', { sdp: pcRef.current.localDescription });
-                        });
-                    }).catch(e => console.log("reneg err", e));
-                }
-            }
-          }
-          setCamActive(true)
-          camActiveRef.current = true;
-          if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
-            dataChanRef.current.send(JSON.stringify({ type: 'cam_toggle', payload: true }));
-          }
-        } catch (e) {
-          console.log("blocked", e)
-          alert("cam blocked")
-        }
+      } catch (e) {
+        console.log("blocked", e)
+        alert("cam blocked")
       }
     }
   }
@@ -511,6 +618,7 @@ export default function App() {
           strangerCamActive={strangerCamActive}
           camActive={camActive}
           micActive={micActive}
+          isPartnerReconnecting={isPartnerReconnecting}
           onSwitchCam={switchCam}
           onSwitchMic={switchMic}
           onReport={handleReport}

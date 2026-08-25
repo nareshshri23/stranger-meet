@@ -1,23 +1,11 @@
-// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
 import { getAnalytics } from "firebase/analytics";
 
-const isLocalhost = typeof window !== 'undefined' && (
-  window.location.hostname === 'localhost' || 
-  window.location.hostname === '127.0.0.1'
-);
-
-// On localhost, use native firebaseapp.com domain to avoid HTTP->HTTPS cross-origin opener locks
-// In production, use your official custom domain (aparichat.app)
-const targetAuthDomain = isLocalhost 
-  ? 'stranger-meet-33687.firebaseapp.com' 
-  : (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'aparichat.app');
-
-// Your web app's Firebase configuration
+// Standard, official Firebase project configuration
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: targetAuthDomain,
+  authDomain: "stranger-meet-33687.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,

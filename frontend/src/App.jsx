@@ -9,7 +9,11 @@ import Header from './components/Header';
 import VideoSection from './components/VideoSection';
 import ChatBox from './components/ChatBox';
 
-const SOKET_URL = 'https://stranger-meet-api.onrender.com'
+const SOKET_URL = import.meta.env.VITE_BACKEND_URL || (
+  window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:5000' 
+    : 'https://stranger-meet-api.onrender.com'
+);
 
 const getDeviceId = () => {
     let id = localStorage.getItem('device_id');
@@ -108,7 +112,14 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    let s_conn = io(SOKET_URL, { auth: { token: getDeviceId() } })
+    if (loadingAuth) return;
+
+    let authPayload = { token: getDeviceId() };
+    if (u && u.email) {
+      authPayload.email = u.email;
+    }
+
+    let s_conn = io(SOKET_URL, { auth: authPayload })
     setSockt(s_conn)
 
     s_conn.on('connect', () => { setSocketReady(true) })
@@ -182,7 +193,7 @@ export default function App() {
     })
 
     return () => { s_conn.disconnect() }
-  }, [])
+  }, [loadingAuth, u])
 
   const attachDataEvents = (chan) => {
     chan.onmessage = (evt) => {

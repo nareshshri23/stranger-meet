@@ -87,7 +87,7 @@ export function BannedScreen() {
   return (
     <div className="h-[100dvh] bg-neutral-950 flex flex-col items-center justify-center text-white p-4 text-center">
       <h1 className="text-4xl font-bold text-red-500 mb-4">BANNED</h1>
-      <p className="text-neutral-400">Your Google Account has been blocked.</p>
+      <p className="text-neutral-400 max-w-md">Your device or connection has been blocked for violating our terms of service.</p>
     </div>
   );
 }

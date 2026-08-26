@@ -456,18 +456,17 @@ io.on('connection', async (socket) => {
             spam_cache[uid] = { strikes: 0, last_hit: 0 };
         }
 
-        // 2. Cooldown check (800ms)
+        // 2. Cooldown check (300ms)
         let time_gap = now_ms - spam_cache[uid].last_hit;
         spam_cache[uid].last_hit = now_ms;
 
-        if (time_gap < 800) {
+        if (time_gap < 300) {
             spam_cache[uid].strikes++;
-            if (spam_cache[uid].strikes >= 4) {
-                console.log(`[SECURITY] Dropping connection for ${uid}. Reason: Spamming find_partner.`);
+            if (spam_cache[uid].strikes >= 8) {
+                console.log(`[SECURITY] Dropping connection for ${uid}. Reason: Excessive spamming find_partner.`);
                 applyBan(socket, 'spam');
                 return;
             }
-            return;
         } else {
             spam_cache[uid].strikes = 0;
         }
@@ -475,36 +474,31 @@ io.on('connection', async (socket) => {
         // 3. Matchmaking
         cleanUpUserSession(socket, false);
 
-        if (standbyQueue.length === 0) {
+        // Filter out dead/stale sockets and self from queue
+        standbyQueue = standbyQueue.filter(id => id !== socket.id && io.sockets.sockets.has(id));
+
+        let matchedPeerSocket = null;
+        while (standbyQueue.length > 0) {
+            const candidateId = standbyQueue.shift();
+            const candidateSocket = io.sockets.sockets.get(candidateId);
+            // Verify candidate is still alive and not in an active session
+            if (candidateSocket && !activePairs[candidateId]) {
+                matchedPeerSocket = candidateSocket;
+                break;
+            }
+        }
+
+        if (!matchedPeerSocket) {
             standbyQueue.push(socket.id);
             socket.emit('waiting', { message: 'Looking for a stranger...' });
         } else {
-            const peerId = standbyQueue.shift();
-            if (peerId === socket.id) {
-                standbyQueue.push(socket.id);
-                return;
-            }
+            const peerId = matchedPeerSocket.id;
 
-            const peerSocket = io.sockets.sockets.get(peerId);
-            if (!peerSocket) {
-                // Peer disconnected while in queue; place current user in queue
-                standbyQueue.push(socket.id);
-                socket.emit('waiting', { message: 'Looking for a stranger...' });
-                return;
-            }
-
-            // Edge Case 1: Unguessable 128-bit Cryptographic Room ID & Strict 1-on-1 Locking
+            // Unguessable 128-bit Cryptographic Room ID & Strict 1-on-1 Locking
             const sessionRoomId = `room_${crypto.randomUUID()}`;
-            
-            // Strictly guarantee max 2 members per room
-            const roomOccupancy = io.sockets.adapter.rooms.get(sessionRoomId)?.size || 0;
-            if (roomOccupancy >= 2) {
-                console.error(`[SECURITY] Attempted third-party intrusion into room ${sessionRoomId}.`);
-                return;
-            }
 
             socket.join(sessionRoomId);
-            peerSocket.join(sessionRoomId);
+            matchedPeerSocket.join(sessionRoomId);
 
             activePairs[socket.id] = { partnerId: peerId, roomId: sessionRoomId, reported: false };
             activePairs[peerId] = { partnerId: socket.id, roomId: sessionRoomId, reported: false };

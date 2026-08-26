@@ -350,26 +350,31 @@ export default function App() {
         if (info.sdp) {
           await pcRef.current.setRemoteDescription(new RTCSessionDescription(info.sdp))
 
-          while (waitQueue.current.length > 0) {
-            let tempCand = waitQueue.current.shift()
-            await pcRef.current.addIceCandidate(new RTCIceCandidate(tempCand))
-          }
-
           if (info.sdp.type === 'offer') {
             let reply = await pcRef.current.createAnswer()
             await pcRef.current.setLocalDescription(reply)
             s_conn.emit('send_signal', { sdp: pcRef.current.localDescription })
           }
+
+          // Flush queued candidates AFTER remote description and answer are set
+          while (waitQueue.current.length > 0) {
+            let tempCand = waitQueue.current.shift()
+            try {
+              await pcRef.current.addIceCandidate(new RTCIceCandidate(tempCand))
+            } catch (_) {}
+          }
         }
         if (info.iceCandidate) {
-          if (pcRef.current.remoteDescription) {
-            await pcRef.current.addIceCandidate(new RTCIceCandidate(info.iceCandidate))
+          if (pcRef.current.remoteDescription && pcRef.current.remoteDescription.type) {
+            try {
+              await pcRef.current.addIceCandidate(new RTCIceCandidate(info.iceCandidate))
+            } catch (_) {}
           } else {
             waitQueue.current.push(info.iceCandidate)
           }
         }
       } catch (e) {
-        console.log("sig err", e)
+        console.warn("[WebRTC] Signal error:", e)
       }
     })
 
@@ -484,22 +489,28 @@ export default function App() {
   const initWebRTC = async (isCaller, sockInstance, dynamicIceServers) => {
     destroyPeerConnection();
 
-    // High availability STUN + TURN servers fallback
+    // High availability STUN + multi-transport TURN servers fallback (UDP + TCP + TLS)
     const defaultIceServers = [
       { 
         urls: [
           'stun:stun.l.google.com:19302',
           'stun:stun1.l.google.com:19302',
           'stun:stun2.l.google.com:19302',
+          'stun:stun3.l.google.com:19302',
+          'stun:stun4.l.google.com:19302',
           'stun:stun.cloudflare.com:3478',
           'stun:global.stun.twilio.com:3478'
         ]
       },
       {
         urls: [
-          import.meta.env.VITE_TURN_URL || 'turn:openrelay.metered.ca:80',
-          import.meta.env.VITE_TURN_URL_TCP || 'turn:openrelay.metered.ca:443?transport=tcp',
+          'turn:openrelay.metered.ca:80',
+          'turn:openrelay.metered.ca:80?transport=tcp',
+          'turn:openrelay.metered.ca:443',
+          'turn:openrelay.metered.ca:443?transport=tcp',
+          'turns:openrelay.metered.ca:443',
           'turns:openrelay.metered.ca:443?transport=tcp',
+          'turns:openrelay.metered.ca:5349',
           'turns:openrelay.metered.ca:5349?transport=tcp'
         ],
         username: import.meta.env.VITE_TURN_USERNAME || 'openrelayproject',
@@ -514,6 +525,13 @@ export default function App() {
 
     const peerCnn = new RTCPeerConnection(rtcConfig)
     pcRef.current = peerCnn
+
+    // Pre-allocate audio & video transceivers so SDP offer always has media lines
+    // This allows instant replaceTrack without failing renegotiations on mobile
+    try {
+      peerCnn.addTransceiver('audio', { direction: 'sendrecv' });
+      peerCnn.addTransceiver('video', { direction: 'sendrecv' });
+    } catch (_) {}
 
     // Stale-closure-free WebRTC event monitoring with functional state updates
     peerCnn.oniceconnectionstatechange = () => {
@@ -590,7 +608,7 @@ export default function App() {
     }
 
     peerCnn.ontrack = (evt) => {
-      if (remoteVidRef.current) remoteVidRef.current.srcObject = evt.streams[0];
+      if (remoteVidRef.current) remoteVidRef.current.srcObject = evt.streams[0] || new MediaStream([evt.track]);
       evt.track.onended = () => {
         console.log("[WebRTC] Remote media track ended.");
         if (remoteVidRef.current) remoteVidRef.current.srcObject = null;
@@ -599,7 +617,11 @@ export default function App() {
     }
 
     if (localStreamObj.current) {
-      localStreamObj.current.getTracks().forEach(trk => peerCnn.addTrack(trk, localStreamObj.current))
+      localStreamObj.current.getTracks().forEach(trk => {
+        let sender = peerCnn.getSenders().find(s => s.track && s.track.kind === trk.kind);
+        if (sender) sender.replaceTrack(trk);
+        else peerCnn.addTrack(trk, localStreamObj.current);
+      });
     }
 
     if (isCaller) {

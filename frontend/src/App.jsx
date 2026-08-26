@@ -135,6 +135,15 @@ export default function App() {
   }
 
   const initMedia = async (reqVideo, reqAudio) => {
+      if (!reqVideo && !reqAudio) {
+        stopAllMediaTracks();
+        setCamActive(false);
+        camActiveRef.current = false;
+        setMicActive(false);
+        setMediaError(null);
+        return;
+      }
+
       try {
           let constraints = {};
           if (reqVideo) constraints.video = { width: { ideal: 1280 }, height: { ideal: 720 } };
@@ -144,15 +153,11 @@ export default function App() {
           try {
             s = await navigator.mediaDevices.getUserMedia(constraints);
           } catch (firstErr) {
-            // Automatic graceful fallback for OverconstrainedError on older hardware
-            if (firstErr.name === 'OverconstrainedError') {
-              s = await navigator.mediaDevices.getUserMedia({
-                video: reqVideo ? true : false,
-                audio: reqAudio ? true : false
-              });
-            } else {
-              throw firstErr;
-            }
+            // Automatic graceful fallback with standard boolean constraints
+            s = await navigator.mediaDevices.getUserMedia({
+              video: reqVideo ? true : false,
+              audio: reqAudio ? true : false
+            });
           }
 
           localStreamObj.current = s;
@@ -628,7 +633,18 @@ export default function App() {
       setMicActive(aTrack.enabled)
     } else {
       try {
-        let newStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        let newStream;
+        try {
+          newStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (firstErr) {
+          if (firstErr.name === 'NotReadableError' || firstErr.name === 'TrackStartError') {
+            await new Promise(res => setTimeout(res, 200));
+            newStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          } else {
+            throw firstErr;
+          }
+        }
+
         let newATrack = newStream.getAudioTracks()[0]
         localStreamObj.current.addTrack(newATrack)
 
@@ -675,8 +691,9 @@ export default function App() {
       // Cleanly stop video hardware sensor so device camera LED turns completely off
       let vTrack = localStreamObj.current.getVideoTracks()[0]
       if (vTrack) {
+        vTrack.enabled = false;
         vTrack.stop();
-        localStreamObj.current.removeTrack(vTrack);
+        try { localStreamObj.current.removeTrack(vTrack); } catch (_) {}
       }
       if (pcRef.current) {
         let sender = pcRef.current.getSenders().find(s => s.track && s.track.kind === 'video');
@@ -692,12 +709,22 @@ export default function App() {
     } else {
       try {
         let newStream;
+        const getCamStream = async () => {
+          try {
+            return await navigator.mediaDevices.getUserMedia({ 
+              video: { width: { ideal: 1280 }, height: { ideal: 720 } } 
+            });
+          } catch (_) {
+            return await navigator.mediaDevices.getUserMedia({ video: true });
+          }
+        };
+
         try {
-          newStream = await navigator.mediaDevices.getUserMedia({ 
-            video: { width: { ideal: 1280 }, height: { ideal: 720 } } 
-          });
+          newStream = await getCamStream();
         } catch (firstErr) {
-          if (firstErr.name === 'OverconstrainedError') {
+          // If Windows DirectShow/MediaFoundation driver is still releasing previous handle, wait 200ms and retry
+          if (firstErr.name === 'NotReadableError' || firstErr.name === 'TrackStartError') {
+            await new Promise(res => setTimeout(res, 200));
             newStream = await navigator.mediaDevices.getUserMedia({ video: true });
           } else {
             throw firstErr;
@@ -705,13 +732,15 @@ export default function App() {
         }
 
         let newVTrack = newStream.getVideoTracks()[0]
-        let oldTrack = localStreamObj.current.getVideoTracks()[0]
-        if (oldTrack) {
-          oldTrack.stop();
-          localStreamObj.current.removeTrack(oldTrack);
+        if (localStreamObj.current) {
+          localStreamObj.current.getVideoTracks().forEach(t => {
+            try { t.stop(); localStreamObj.current.removeTrack(t); } catch (_) {}
+          });
+          localStreamObj.current.addTrack(newVTrack);
+        } else {
+          localStreamObj.current = newStream;
         }
 
-        localStreamObj.current.addTrack(newVTrack)
         if (selfVidRef.current) selfVidRef.current.srcObject = localStreamObj.current
 
         if (pcRef.current) {
@@ -802,7 +831,7 @@ export default function App() {
 
       <MediaErrorModal 
         errorType={mediaError} 
-        onRetry={() => initMedia(camActiveRef.current, micActive)} 
+        onRetry={() => initMedia(true, micActive)} 
         onContinueTextOnly={() => setMediaError(null)} 
       />
 

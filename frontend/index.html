@@ -2,16 +2,26 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/logo.png" />
-    <link rel="apple-touch-icon" href="/logo.png" />
+    <!-- Google Favicon & Icons Compliance -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/logo.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/logo.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/logo.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/logo.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0a0a0a" />
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Aparichat - Free Random Video Chat | Talk to Strangers</title>
-    <meta name="description" content="Aparichat is the best Omegle alternative. Talk to strangers, meet new people online, and enjoy free, anonymous random video chat instantly." />
-    <meta name="keywords" content="Omegle alternative, talk to strangers, random video chat, anonymous chat, meet new people online, free video call, OmeTV alternative" />
+    <meta name="description" content="Aparichat is the best free Omegle alternative. Talk to strangers, meet new people online, and enjoy free anonymous random video and text chat instantly." />
+    <meta name="keywords" content="Aparichat, ApariChat, talk to strangers, Omegle alternative, random video chat, anonymous chat, free video call, stranger chat, OmeTV alternative, online video chat" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large" />
+    <meta name="author" content="Aparichat" />
     <link rel="canonical" href="https://aparichat.app/" />
     
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Aparichat" />
     <meta property="og:url" content="https://aparichat.app/" />
     <meta property="og:title" content="Aparichat - Free Random Video Chat | Talk to Strangers" />
     <meta property="og:description" content="Aparichat is the best Omegle alternative. Talk to strangers, meet new people online, and enjoy free, anonymous random video chat instantly." />
@@ -28,23 +38,41 @@
     <meta property="twitter:image" content="https://aparichat.app/og-preview.png" />
     <meta property="twitter:image:alt" content="Aparichat - The premier instant random text and video chat platform" />
 
-    <!-- Structured Data / JSON-LD for Google Search -->
+    <!-- Structured Data / JSON-LD for Google Search & Knowledge Graph -->
     <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "WebApplication",
-      "name": "Aparichat",
-      "url": "https://aparichat.app/",
-      "applicationCategory": "CommunicationApplication",
-      "operatingSystem": "All",
-      "browserRequirements": "Requires JavaScript. Requires HTML5.",
-      "description": "Aparichat is a free, anonymous random video and text chat platform to meet strangers worldwide.",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "USD"
+    [
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Aparichat",
+        "alternateName": ["ApariChat", "Apari Chat", "Aparichat App", "Aparichat.app"],
+        "url": "https://aparichat.app/",
+        "description": "Aparichat is a free, anonymous random video and text chat platform to meet strangers worldwide.",
+        "publisher": {
+          "@type": "Organization",
+          "name": "Aparichat",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://aparichat.app/logo.png"
+          }
+        }
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Aparichat",
+        "url": "https://aparichat.app/",
+        "applicationCategory": "CommunicationApplication",
+        "operatingSystem": "All",
+        "browserRequirements": "Requires JavaScript. Requires HTML5.",
+        "description": "Aparichat is a free, anonymous random video and text chat platform to meet strangers worldwide.",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
       }
-    }
+    ]
     </script>
   </head>
   <body>

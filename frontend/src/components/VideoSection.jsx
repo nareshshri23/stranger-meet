@@ -33,7 +33,7 @@ export default function VideoSection({
           ref={remoteVidRef} 
           autoPlay 
           playsInline 
-          className={`w-full h-full object-cover ${(!strangerCamActive || matchStatus !== 'connected' || icePhase === 'securing' || icePhase === 'probing') ? 'hidden' : ''} ${showStrangerBlur ? 'blur-2xl scale-110' : ''}`} 
+          className={`w-full h-full object-cover ${(!strangerCamActive || matchStatus !== 'connected' || isPartnerReconnecting || icePhase === 'securing' || icePhase === 'probing') ? 'hidden' : ''} ${showStrangerBlur ? 'blur-2xl scale-110' : ''}`} 
         />
 
         {/* Reconnecting Overlay */}

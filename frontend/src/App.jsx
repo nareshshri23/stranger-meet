@@ -114,6 +114,7 @@ export default function App() {
       try {
         dataChanRef.current.onmessage = null;
         dataChanRef.current.onopen = null;
+        dataChanRef.current.onclose = null;
         dataChanRef.current.close();
       } catch (_) {}
       dataChanRef.current = null;
@@ -124,6 +125,7 @@ export default function App() {
         pcRef.current.onicecandidate = null;
         pcRef.current.ondatachannel = null;
         pcRef.current.oniceconnectionstatechange = null;
+        pcRef.current.onconnectionstatechange = null;
         pcRef.current.close();
       } catch (_) {}
       pcRef.current = null;
@@ -131,6 +133,7 @@ export default function App() {
     if (remoteVidRef.current) {
       remoteVidRef.current.srcObject = null;
     }
+    setStrangerCamActive(false);
     waitQueue.current = [];
   }
 
@@ -198,9 +201,15 @@ export default function App() {
       }
   }
 
-  // Cleanup on tab close / browser navigation
+  // Cleanup on tab close / browser navigation with instant leave broadcast
   useEffect(() => {
     const handleUnload = () => {
+      if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
+        try { dataChanRef.current.send(JSON.stringify({ type: 'peer_left' })); } catch (_) {}
+      }
+      if (sockt) {
+        try { sockt.emit('leave_partner'); } catch (_) {}
+      }
       stopAllMediaTracks();
       destroyPeerConnection();
     };
@@ -210,7 +219,7 @@ export default function App() {
       window.removeEventListener('beforeunload', handleUnload);
       window.removeEventListener('pagehide', handleUnload);
     };
-  }, []);
+  }, [sockt]);
 
   // Mobile Background Throttling & Visibility Recovery
   useEffect(() => {
@@ -307,8 +316,10 @@ export default function App() {
 
     // Edge Case 2: Graceful "Tunnel Drop" Reconnect Handling
     s_conn.on('partner_reconnecting', (data) => {
-      setIsPartnerReconnecting(true)
-      setChatLog((prev) => [...prev, { senderName: 'Sys', text: data.message || 'Stranger network switched. Reconnecting...', isSelf: false, isSys: true }])
+      setIsPartnerReconnecting(true);
+      setStrangerCamActive(false);
+      if (remoteVidRef.current) remoteVidRef.current.srcObject = null;
+      setChatLog((prev) => [...prev, { senderName: 'Sys', text: data.message || 'Stranger network switched. Reconnecting...', isSelf: false, isSys: true }]);
     })
 
     s_conn.on('session_recovered', async (data) => {
@@ -370,6 +381,7 @@ export default function App() {
       icePhaseRef.current = 'idle'
       setStrangerTyping(false)
       setStrangerCamActive(false)
+      if (remoteVidRef.current) remoteVidRef.current.srcObject = null;
       setChatLog((prev) => [...prev, { senderName: 'Sys', text: info.message, isSelf: false, isSys: true }])
       destroyPeerConnection()
     })
@@ -395,6 +407,12 @@ export default function App() {
     // Defense in Depth: Create a per-channel P2P rate limiter (max 12 packets / 2 seconds)
     const peerRateLimiter = createPeerRateLimiter(12, 2000);
 
+    chan.onclose = () => {
+      console.log("[DataChannel] Peer closed data channel.");
+      if (remoteVidRef.current) remoteVidRef.current.srcObject = null;
+      setStrangerCamActive(false);
+    };
+
     chan.onmessage = (evt) => {
       // 1. P2P flood protection
       if (!peerRateLimiter()) return;
@@ -402,6 +420,20 @@ export default function App() {
       try {
         const data = JSON.parse(evt.data);
         if (!data || typeof data !== 'object') return;
+
+        if (data.type === 'peer_left') {
+          setIsPartnerReconnecting(false);
+          setIsStrangerBackgrounded(false);
+          setMatchStatus('idle');
+          setIcePhase('idle');
+          icePhaseRef.current = 'idle';
+          setStrangerTyping(false);
+          setStrangerCamActive(false);
+          if (remoteVidRef.current) remoteVidRef.current.srcObject = null;
+          setChatLog((prev) => [...prev, { senderName: 'Sys', text: 'Stranger disconnected.', isSelf: false, isSys: true }]);
+          destroyPeerConnection();
+          return;
+        }
 
         if (data.type === 'msg') {
           setStrangerTyping(false);
@@ -540,6 +572,16 @@ export default function App() {
       }
     }
 
+    // Real-world WebRTC PeerConnection State Monitoring
+    peerCnn.onconnectionstatechange = () => {
+      const state = peerCnn.connectionState;
+      console.log("[WebRTC] PeerConnection State:", state);
+      if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+        if (remoteVidRef.current) remoteVidRef.current.srcObject = null;
+        setStrangerCamActive(false);
+      }
+    };
+
     peerCnn.onicecandidate = (evt) => {
       if (evt.candidate) {
         // WebRTC Privacy: Preserve mDNS candidates and filter out raw private host IP exposure
@@ -548,7 +590,12 @@ export default function App() {
     }
 
     peerCnn.ontrack = (evt) => {
-      if (remoteVidRef.current) remoteVidRef.current.srcObject = evt.streams[0]
+      if (remoteVidRef.current) remoteVidRef.current.srcObject = evt.streams[0];
+      evt.track.onended = () => {
+        console.log("[WebRTC] Remote media track ended.");
+        if (remoteVidRef.current) remoteVidRef.current.srcObject = null;
+        setStrangerCamActive(false);
+      };
     }
 
     if (localStreamObj.current) {
@@ -566,6 +613,11 @@ export default function App() {
 
   const clickNext = () => {
     if (sockt) {
+      if (dataChanRef.current && dataChanRef.current.readyState === 'open') {
+        try { dataChanRef.current.send(JSON.stringify({ type: 'peer_left' })); } catch (_) {}
+      }
+      try { sockt.emit('leave_partner'); } catch (_) {}
+
       setIsPartnerReconnecting(false)
       setIsStrangerBackgrounded(false)
       setMatchStatus('searching')

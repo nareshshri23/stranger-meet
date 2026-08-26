@@ -573,6 +573,11 @@ io.on('connection', async (socket) => {
         }
     });
 
+    // Intentional leave (Next button, tab close, logout) -> immediate zero-lag disconnect
+    socket.on('leave_partner', () => {
+        cleanUpUserSession(socket, false);
+    });
+
     socket.on('disconnect', () => {
         const ip = socket.user_ip;
         if (ip && ip_connection_counts.has(ip)) {

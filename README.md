@@ -1,129 +1,124 @@
-# STRANGER_MEET - Anonymous Video Chat Platform
+# 🌐 APARICHAT — Free Random Video & Text Chat
 
-A real-time video chat application that connects random strangers for peer-to-peer video and text conversations.
+<p align="center">
+  <a href="https://aparichat.app" target="_blank">
+    <img src="frontend/public/logo.png" alt="Aparichat Logo" width="90" height="90" />
+  </a>
+</p>
 
-## 🚀 Features
+<p align="center">
+  <b>A fast, free, and secure peer-to-peer random video and text chat web application to meet new people worldwide.</b>
+</p>
 
-- **P2P Video & Audio**: Direct peer-to-peer video and audio streaming using WebRTC
-- **Text Chat**: Real-time messaging via WebRTC data channels
-- **Random Matching**: Connect with random strangers instantly
-- **Camera & Mic Control**: Toggle audio and video on/off during calls
-- **Report System**: Report inappropriate behavior (IP-based banning)
-- **Age Verification**: 18+ age gate with localStorage persistence
-- **Responsive Design**: Mobile-friendly UI with Tailwind CSS
-
-## 🛠️ Tech Stack
-
-### Backend
-- **Node.js** - JavaScript runtime
-- **Express** - Web framework
-- **Socket.io** - Real-time WebSocket communication
-- **CORS** - Cross-origin resource sharing
-
-### Frontend
-- **React** - UI framework
-- **Vite** - Fast build tool
-- **Socket.io Client** - Client-side WebSocket
-- **Tailwind CSS** - Utility-first CSS framework
-- **WebRTC** - Peer-to-peer media streaming
-
-## 📋 Prerequisites
-
-- Node.js (v14 or higher)
-- npm or yarn package manager
-
-## 📦 Installation
-
-1. **Clone the repository**
-```bash
-cd chat-webapp
-```
-
-2. **Install backend dependencies**
-```bash
-cd backend
-npm install
-```
-
-3. **Install frontend dependencies**
-```bash
-cd ../frontend
-npm install
-```
-
-## ▶️ Running the Application
-
-### Start Backend Server
-```bash
-cd backend
-npm start
-```
-Server runs on `http://localhost:5000`
-
-### Start Frontend Development Server
-```bash
-cd frontend
-npm run dev
-```
-Frontend runs on `http://localhost:5173`
-
-### Build for Production
-```bash
-cd frontend
-npm run build
-```
-
-## 📝 Usage
-
-1. Open the app in your browser
-2. Accept the 18+ age agreement (stored in localStorage)
-3. Allow camera and microphone permissions
-4. Click "Start Chatting" to find a random stranger
-5. Use text chat via the data channel on the right
-6. Toggle mic/camera buttons to control media
-7. Click "Report" to ban inappropriate users
-8. Click "Next Stranger" to disconnect and find someone new
-
-## 🔧 Project Structure
-
-```
-chat-webapp/
-├── backend/
-│   ├── package.json
-│   ├── server.js          # Main server & signaling logic
-│   └── node_modules/
-│
-└── frontend/
-    ├── src/
-    │   ├── App.jsx        # Main React component
-    │   ├── index.css      # Global styles
-    │   ├── main.jsx       # React entry point
-    │   └── assets/        # Images & icons
-    ├── index.html         # HTML template
-    ├── package.json
-    ├── vite.config.js     # Vite configuration
-    ├── tailwind.config.js # Tailwind configuration
-    └── node_modules/
-```
-
-## ⚙️ Configuration
-
-### Backend Server Port
-Edit `backend/server.js`:
-```javascript
-const PORT = process.env.PORT || 5000;
-```
-
-### Frontend API URL
-Edit `frontend/src/App.jsx`:
-```javascript
-const SOKET_URL = 'http://localhost:5000'
-```
-
-## 👤 Support
-
-For issues, bugs, or feature requests, please open an issue on GitHub.
+<p align="center">
+  <a href="https://aparichat.app"><img src="https://img.shields.io/badge/Live_Site-aparichat.app-2563eb?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Live Site" /></a>
+  <a href="https://webrtc.org"><img src="https://img.shields.io/badge/WebRTC-P2P_Encrypted-FF6B6B?style=for-the-badge&logo=webrtc&logoColor=white" alt="WebRTC" /></a>
+  <a href="https://react.dev"><img src="https://img.shields.io/badge/Frontend-React_18-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Backend-Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="MIT License" /></a>
+</p>
 
 ---
 
-**Last Updated**: June 2, 2026
+## 🔗 Live Application
+
+🌐 **Website**: [https://aparichat.app](https://aparichat.app)
+
+---
+
+## ✨ Features
+
+- 🎥 **Real-Time P2P Video & Audio**: Ultra-low latency video streaming powered by WebRTC with pre-allocated transceivers.
+- 📱 **Cross-Network Compatibility**: Multi-transport TURN relays (`UDP`, `TCP`, `TLS`) allowing seamless connection between mobile cellular data (4G/5G) and home Wi-Fi.
+- 💬 **Encrypted P2P Text Chat**: Direct client-to-client messaging over SCTP DataChannels with DOMPurify sanitization.
+- ⚡ **Smart Matchmaking**: Sub-300ms pairing queue with instant zero-delay tab close cleanup and anti-spam protection.
+- 🔒 **Privacy & Safety**: Safe hardware camera/mic controls, 18+ age verification, and community report/moderation tools.
+- 🎨 **Modern Responsive UI**: Clean dark mode interface built with Tailwind CSS, Lucide icons, and real-time connection telemetry.
+
+---
+
+## 🛠️ Tech Stack
+
+- **Frontend**: React 18, Vite, Tailwind CSS, Lucide React, Firebase Authentication, DOMPurify
+- **Backend**: Node.js, Express, Socket.io
+- **Media & Protocol**: WebRTC (RTCPeerConnection, RTCDataChannel), STUN/TURN Relays
+- **Hosting**: Vercel (Frontend) & Render (Backend Signaling Service)
+
+---
+
+## 📂 Project Structure
+
+```
+aparichat/
+├── backend/
+│   ├── package.json
+│   └── server.js               # Signaling server, matchmaking queue & moderation logic
+│
+├── frontend/
+│   ├── public/                 # Favicons, PWA manifest, SEO schemas & sitemap
+│   ├── src/
+│   │   ├── components/         # React UI components (Video, Chat, Modals, Toasts)
+│   │   ├── utils/              # Text sanitization & P2P rate limiters
+│   │   ├── App.jsx             # WebRTC state machine & signaling coordinator
+│   │   └── firebase.js         # Firebase Auth configuration
+│   ├── index.html              # Open Graph, SEO tags & JSON-LD schemas
+│   └── vite.config.js
+│
+└── README.md
+```
+
+---
+
+## 🚀 Getting Started Locally
+
+### 1. Prerequisites
+- **Node.js** (v18.0.0 or higher)
+- **npm** or **yarn**
+
+### 2. Clone the Repository
+```bash
+git clone https://github.com/nareshshri23/stranger-meet.git
+cd stranger-meet
+```
+
+### 3. Backend Setup
+```bash
+cd backend
+npm install
+npm start
+```
+> The signaling server runs on `http://localhost:5000`.
+
+### 4. Frontend Setup
+In a new terminal window:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+> The frontend runs on `http://localhost:5173`.
+
+---
+
+## 🔐 Environment Variables
+
+### Backend (`backend/.env`)
+```env
+PORT=5000
+FRONTEND_URL=http://localhost:5173,https://aparichat.app
+ALLOWED_ORIGINS=http://localhost:5173,https://aparichat.app
+```
+
+### Frontend (`frontend/.env`)
+```env
+VITE_SERVER_URL=http://localhost:5000
+VITE_FIREBASE_API_KEY=your_firebase_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your_project_id
+```
+
+---
+
+## 📄 License
+
+This project is open source and available under the [MIT License](LICENSE).

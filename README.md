@@ -15,7 +15,7 @@
   <a href="https://webrtc.org"><img src="https://img.shields.io/badge/WebRTC-P2P_Encrypted-FF6B6B?style=for-the-badge&logo=webrtc&logoColor=white" alt="WebRTC" /></a>
   <a href="https://react.dev"><img src="https://img.shields.io/badge/Frontend-React_18-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React" /></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Backend-Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="MIT License" /></a>
+  
 </p>
 
 ---

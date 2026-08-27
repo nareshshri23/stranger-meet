@@ -149,8 +149,8 @@ export default function App() {
 
       try {
           let constraints = {};
-          if (reqVideo) constraints.video = { width: { ideal: 1280 }, height: { ideal: 720 } };
-          if (reqAudio) constraints.audio = true;
+          if (reqVideo) constraints.video = { width: { ideal: 640, max: 1280 }, height: { ideal: 480, max: 720 }, frameRate: { ideal: 24, max: 30 } };
+          if (reqAudio) constraints.audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
           
           let s;
           try {
@@ -786,7 +786,7 @@ export default function App() {
         const getCamStream = async () => {
           try {
             return await navigator.mediaDevices.getUserMedia({ 
-              video: { width: { ideal: 1280 }, height: { ideal: 720 } } 
+              video: { width: { ideal: 640, max: 1280 }, height: { ideal: 480, max: 720 }, frameRate: { ideal: 24, max: 30 } } 
             });
           } catch (_) {
             return await navigator.mediaDevices.getUserMedia({ video: true });

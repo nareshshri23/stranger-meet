@@ -21,6 +21,14 @@ export default function VideoSection({
   onSwitchMic,
   onReport
 }) {
+  const [remoteVideoPlaying, setRemoteVideoPlaying] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!strangerCamActive || matchStatus !== 'connected' || isPartnerReconnecting) {
+      setRemoteVideoPlaying(false);
+    }
+  }, [strangerCamActive, matchStatus, isPartnerReconnecting]);
+
   const showStrangerBlur = strangerCamActive && matchStatus === 'connected' && !user;
   const isPermissionBlocked = mediaError === 'NotAllowedError' || mediaError === 'PermissionDeniedError';
 
@@ -33,8 +41,18 @@ export default function VideoSection({
           ref={remoteVidRef} 
           autoPlay 
           playsInline 
-          className={`w-full h-full object-cover ${(!strangerCamActive || matchStatus !== 'connected' || isPartnerReconnecting || icePhase === 'securing' || icePhase === 'probing') ? 'hidden' : ''} ${showStrangerBlur ? 'blur-2xl scale-110' : ''}`} 
+          onPlaying={() => setRemoteVideoPlaying(true)}
+          onLoadedData={() => setRemoteVideoPlaying(true)}
+          className={`w-full h-full object-cover ${(!strangerCamActive || matchStatus !== 'connected' || isPartnerReconnecting || icePhase === 'securing' || icePhase === 'probing' || !remoteVideoPlaying) ? 'hidden' : ''} ${showStrangerBlur ? 'blur-2xl scale-110' : ''}`} 
         />
+
+        {/* Video Decoding Spinner (Prevents Raw Black Frame while 4G buffers first Keyframe) */}
+        {matchStatus === 'connected' && strangerCamActive && !remoteVideoPlaying && !isPartnerReconnecting && icePhase === 'connected' && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-900 text-neutral-400 p-4 text-center">
+            <div className="w-7 h-7 rounded-full border-2 border-blue-500 border-t-transparent animate-spin mb-2" />
+            <p className="text-xs font-medium text-neutral-300">Receiving video feed...</p>
+          </div>
+        )}
 
         {/* Reconnecting Overlay */}
         {isPartnerReconnecting && matchStatus === 'connected' && (

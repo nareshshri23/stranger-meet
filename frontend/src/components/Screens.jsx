@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Video, ShieldCheck, SkipForward } from 'lucide-react';
 
 export function LandingScreen({ onStart }) {

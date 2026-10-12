@@ -6,9 +6,10 @@ import DOMPurify from 'dompurify';
  */
 function cleanControlAndInvisibleChars(str) {
   if (typeof str !== 'string') return '';
+  const controlPattern = '[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F]';
   return str
     // Remove control characters (except common whitespace: \n, \r, \t)
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '')
+    .replace(new RegExp(controlPattern, 'g'), '')
     // Remove zero-width characters (zero-width space, non-joiner, joiner, BOM)
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
     // Remove Unicode bidirectional override characters (prevents text reversal spoofing)

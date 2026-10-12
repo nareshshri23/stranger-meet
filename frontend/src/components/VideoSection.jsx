@@ -5,10 +5,10 @@ export default function VideoSection({
   user,
   onLogin,
   remoteVidRef,
+  remoteAudioRef,
   selfVidRef,
   matchStatus,
   strangerNickname,
-  myNickname,
   strangerCamActive,
   camActive,
   micActive,
@@ -23,11 +23,12 @@ export default function VideoSection({
 }) {
   const [remoteVideoPlaying, setRemoteVideoPlaying] = React.useState(false);
 
-  React.useEffect(() => {
-    if (!strangerCamActive || matchStatus !== 'connected' || isPartnerReconnecting) {
-      setRemoteVideoPlaying(false);
-    }
-  }, [strangerCamActive, matchStatus, isPartnerReconnecting]);
+  const shouldShowRemoteVideo =
+    strangerCamActive &&
+    matchStatus === 'connected' &&
+    !isPartnerReconnecting &&
+    icePhase !== 'securing' &&
+    icePhase !== 'probing';
 
   const showStrangerBlur = strangerCamActive && matchStatus === 'connected' && !user;
   const isPermissionBlocked = mediaError === 'NotAllowedError' || mediaError === 'PermissionDeniedError';
@@ -41,10 +42,24 @@ export default function VideoSection({
           ref={remoteVidRef} 
           autoPlay 
           playsInline 
+          muted
+          onLoadedMetadata={(event) => {
+            event.currentTarget.play().catch(() => {
+              // Browser autoplay may wait for the user's next interaction.
+            });
+          }}
           onPlaying={() => setRemoteVideoPlaying(true)}
-          onLoadedData={() => setRemoteVideoPlaying(true)}
-          className={`w-full h-full object-cover ${(!strangerCamActive || matchStatus !== 'connected' || isPartnerReconnecting || icePhase === 'securing' || icePhase === 'probing' || !remoteVideoPlaying) ? 'hidden' : ''} ${showStrangerBlur ? 'blur-2xl scale-110' : ''}`} 
+          onLoadedData={(event) => {
+            setRemoteVideoPlaying(true);
+            event.currentTarget.play().catch(() => {
+              // Browser autoplay may wait for the user's next interaction.
+            });
+          }}
+          onPause={() => setRemoteVideoPlaying(false)}
+          onError={() => setRemoteVideoPlaying(false)}
+          className={`w-full h-full object-cover ${!shouldShowRemoteVideo ? 'hidden' : ''} ${showStrangerBlur ? 'blur-2xl scale-110' : ''}`} 
         />
+        <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
         {/* Video Decoding Spinner (Prevents Raw Black Frame while 4G buffers first Keyframe) */}
         {matchStatus === 'connected' && strangerCamActive && !remoteVideoPlaying && !isPartnerReconnecting && icePhase === 'connected' && (

@@ -1,5 +1,4 @@
-import React from 'react';
-import { Wifi, WifiOff, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Wifi, WifiOff, RefreshCw, CheckCircle2 } from 'lucide-react';
 
 export default function NetworkToast({ toast }) {
   if (!toast || !toast.message) return null;

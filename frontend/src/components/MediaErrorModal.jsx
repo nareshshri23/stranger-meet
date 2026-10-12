@@ -1,4 +1,3 @@
-import React from 'react';
 import { CameraOff, VideoOff, AlertTriangle, Lock, RefreshCw, MessageSquare } from 'lucide-react';
 
 export default function MediaErrorModal({ errorType, onRetry, onContinueTextOnly }) {

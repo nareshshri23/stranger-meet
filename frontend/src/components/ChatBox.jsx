@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Smile } from 'lucide-react';
 
 const COMMON_EMOJIS = ["😀", "😂", "🥰", "😎", "😭", "🥺", "😡", "👍", "👎", "❤️", "🔥", "✨", "🎉", "💯", "🙏", "👋", "👀", "💀", "🤡", "👽"];

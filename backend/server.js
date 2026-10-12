@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { initializeApp, cert } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 import path from 'path';
@@ -15,6 +16,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 
 let db = null;
+let adminAuth = null;
 try {
     let serviceAccount = null;
     // For Production (Render / Cloud): Read JSON string from Environment Variables
@@ -38,8 +40,9 @@ try {
         initializeApp({
             credential: cert(serviceAccount)
         });
+        adminAuth = getAuth();
         db = getFirestore();
-        console.log("Firebase Admin initialized successfully with Firestore.");
+        console.log("Firebase Admin initialized successfully with Firestore and Auth.");
     } else {
         console.warn("No Firebase service account credentials found. Running with in-memory fallback.");
     }
@@ -91,14 +94,14 @@ app.use(cors({
 
 app.use(express.json({ limit: '10kb' }));
 
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
     res.json({
         status: 'healthy',
         timestamp: Date.now(),
         activeUsers: io.engine.clientsCount,
-        standbyQueueLength: standbyQueue.length,
-        activeMatches: Object.keys(activePairs).length / 2,
-        pendingReconnects: pending_reconnects.size
+        standbyQueueLength: await getQueueLength(),
+        activeMatches: await getActivePairCount(),
+        pendingReconnects: await getPendingReconnectCount()
     });
 });
 
@@ -217,23 +220,31 @@ const io = new Server(server, {
 });
 
 // Cross-Instance Signaling Adapter for Multi-Core / Multi-Server Scaling (Render & PM2)
-if (process.env.REDIS_URL) {
+let stateRedis = null;
+
+async function initSharedStateStore() {
+    if (!process.env.REDIS_URL) {
+        console.log("Running in standalone in-memory signaling mode (REDIS_URL not set).");
+        return;
+    }
+
     try {
         const { createClient } = await import('redis');
         const { createAdapter } = await import('@socket.io/redis-adapter');
-        
+
         const pubClient = createClient({ url: process.env.REDIS_URL });
         const subClient = pubClient.duplicate();
 
         await Promise.all([pubClient.connect(), subClient.connect()]);
+        stateRedis = pubClient;
         io.adapter(createAdapter(pubClient, subClient));
         console.log("Redis Pub/Sub adapter connected successfully for multi-core/cross-instance signaling.");
     } catch (err) {
         console.warn("Failed to initialize Redis adapter, falling back to standalone in-memory mode:", err.message);
     }
-} else {
-    console.log("Running in standalone in-memory signaling mode (REDIS_URL not set).");
 }
+
+await initSharedStateStore();
 
 let standbyQueue = [];
 let activePairs = {};
@@ -241,6 +252,130 @@ let activePairs = {};
 // Graceful Reconnect Engine ("Tunnel Drop" Recovery)
 // Maps user_uuid -> { partnerId, partner_uuid, roomId, timeout }
 const pending_reconnects = new Map();
+
+const queueKey = 'stranger_meet:queue';
+const activePairsKey = 'stranger_meet:active_pairs';
+const reconnectsKey = 'stranger_meet:reconnects';
+
+async function getQueueSnapshot() {
+    if (stateRedis) {
+        const ids = await stateRedis.lRange(queueKey, 0, -1);
+        return ids.filter(Boolean);
+    }
+    return standbyQueue.slice();
+}
+
+async function getQueueLength() {
+    return (await getQueueSnapshot()).length;
+}
+
+async function enqueueSocketForMatching(socketId) {
+    if (stateRedis) {
+        await stateRedis.rPush(queueKey, socketId);
+        return;
+    }
+    standbyQueue.push(socketId);
+}
+
+async function removeSocketFromQueue(socketId) {
+    if (stateRedis) {
+        await stateRedis.lRem(queueKey, 0, socketId);
+        return;
+    }
+    standbyQueue = standbyQueue.filter(id => id !== socketId);
+}
+
+async function popNextMatchCandidate() {
+    if (stateRedis) {
+        // LPOP is atomic, so two workers cannot claim the same queued user.
+        return await stateRedis.lPop(queueKey);
+    }
+
+    if (standbyQueue.length === 0) return null;
+    const candidate = standbyQueue.shift();
+    return candidate ?? null;
+}
+
+async function getSocketById(socketId) {
+    const localSocket = io.sockets.sockets.get(socketId);
+    if (localSocket) return localSocket;
+
+    const sockets = await io.fetchSockets();
+    return sockets.find(candidate => candidate.id === socketId) || null;
+}
+
+async function getActiveSession(socketId) {
+    if (stateRedis) {
+        const raw = await stateRedis.hGet(activePairsKey, socketId);
+        if (!raw) return null;
+        try {
+            return JSON.parse(raw);
+        } catch {
+            return null;
+        }
+    }
+    return activePairs[socketId] ?? null;
+}
+
+async function setActiveSession(socketId, session) {
+    if (stateRedis) {
+        await stateRedis.hSet(activePairsKey, socketId, JSON.stringify(session));
+        return;
+    }
+    activePairs[socketId] = session;
+}
+
+async function deleteActiveSession(socketId) {
+    if (stateRedis) {
+        await stateRedis.hDel(activePairsKey, socketId);
+        return;
+    }
+    delete activePairs[socketId];
+}
+
+async function getActivePairCount() {
+    if (stateRedis) {
+        const entries = await stateRedis.hVals(activePairsKey);
+        return entries.length / 2;
+    }
+    return Object.keys(activePairs).length / 2;
+}
+
+async function getPendingReconnect(uuid) {
+    if (stateRedis) {
+        const raw = await stateRedis.hGet(reconnectsKey, uuid);
+        if (!raw) return null;
+        try {
+            return JSON.parse(raw);
+        } catch {
+            return null;
+        }
+    }
+    return pending_reconnects.get(uuid) ?? null;
+}
+
+async function setPendingReconnect(uuid, payload) {
+    if (stateRedis) {
+        await stateRedis.hSet(reconnectsKey, uuid, JSON.stringify(payload));
+        return;
+    }
+    pending_reconnects.set(uuid, payload);
+}
+
+async function deletePendingReconnect(uuid) {
+    if (stateRedis) {
+        await stateRedis.hDel(reconnectsKey, uuid);
+        return;
+    }
+    pending_reconnects.delete(uuid);
+}
+
+async function getPendingReconnectCount() {
+    if (stateRedis) {
+        return await stateRedis.hLen(reconnectsKey);
+    }
+    return pending_reconnects.size;
+}
 
 // In-Memory Banning Fallbacks
 const banned_uuids = new Set();
@@ -285,14 +420,33 @@ const isLocalIp = (testIp) => {
 
 // Authenticate and rate limit socket connections
 io.use(async (socket, next) => {
-    const user_uuid = socket.handshake.auth.token;
+    const deviceId = socket.handshake.auth.token || socket.handshake.auth.deviceId || null;
     const email = socket.handshake.auth.email || null;
+    const firebaseToken = socket.handshake.auth.firebaseToken || null;
     const rawIp = socket.handshake.headers['x-forwarded-for'] 
         ? socket.handshake.headers['x-forwarded-for'].split(',')[0].trim() 
         : socket.handshake.address;
     const ip = isLocalIp(rawIp) ? null : rawIp;
 
-    if (!user_uuid) {
+    let user_uuid = deviceId || socket.id;
+    let verifiedEmail = email;
+
+    if (firebaseToken) {
+        if (!adminAuth) {
+            return next(new Error("authentication error: Firebase admin unavailable"));
+        }
+
+        try {
+            const decoded = await adminAuth.verifyIdToken(firebaseToken);
+            user_uuid = decoded.uid;
+            verifiedEmail = decoded.email || email || null;
+        } catch (err) {
+            console.warn("[AUTH] Rejected invalid Firebase token:", err.message);
+            return next(new Error("authentication error: invalid Firebase token"));
+        }
+    }
+
+    if (!deviceId && !firebaseToken) {
         return next(new Error("authentication error: missing UUID"));
     }
 
@@ -312,14 +466,14 @@ io.use(async (socket, next) => {
             let isBanned = false;
 
             // 1. Direct document check (Fastest O(1) read, zero index required)
-            const docId = email || user_uuid;
+            const docId = verifiedEmail || user_uuid;
             const directDoc = await bansRef.doc(docId).get();
             if (directDoc.exists && directDoc.data().banExpiry > now) {
                 isBanned = true;
             }
 
             // 2. Check by UUID if email was used as docId
-            if (!isBanned && email) {
+            if (!isBanned && verifiedEmail) {
                 const uuidSnap = await bansRef.where('uuid', '==', user_uuid).get();
                 if (!uuidSnap.empty && uuidSnap.docs.some(doc => doc.data().banExpiry > now)) {
                     isBanned = true;
@@ -348,7 +502,8 @@ io.use(async (socket, next) => {
 
     socket.user_uuid = user_uuid;
     socket.user_ip = ip;
-    socket.user_email = email;
+    socket.user_email = verifiedEmail;
+    socket.user_auth_type = firebaseToken ? 'firebase' : 'anonymous';
     next();
 });
 
@@ -414,10 +569,10 @@ io.on('connection', async (socket) => {
     console.log(`Verified user connected: ${socket.id} (UUID: ${socket.user_uuid})`);
 
     // Edge Case 2: Check if this user was in a "Tunnel Drop" reconnect window
-    if (pending_reconnects.has(socket.user_uuid)) {
-        const pending = pending_reconnects.get(socket.user_uuid);
+    const pending = await getPendingReconnect(socket.user_uuid);
+    if (pending) {
         clearTimeout(pending.timeout);
-        pending_reconnects.delete(socket.user_uuid);
+        await deletePendingReconnect(socket.user_uuid);
 
         const partnerId = pending.partnerId;
         const partnerSocket = io.sockets.sockets.get(partnerId);
@@ -426,13 +581,10 @@ io.on('connection', async (socket) => {
             const roomId = pending.roomId;
             socket.join(roomId);
 
-            // Re-bind bidirectional pairing
-            activePairs[socket.id] = { partnerId: partnerId, roomId: roomId, reported: false };
-            activePairs[partnerId] = { partnerId: socket.id, roomId: roomId, reported: false };
+            await setActiveSession(socket.id, { partnerId, roomId, reported: false });
+            await setActiveSession(partnerId, { partnerId: socket.id, roomId, reported: false });
 
             const iceServers = await getTurnServers();
-
-            // Notify both clients to perform smooth WebRTC ICE restart
             socket.emit('session_recovered', { roomId, isCaller: true, iceServers });
             io.to(partnerId).emit('session_recovered', { roomId, isCaller: false, iceServers });
             console.log(`[RECOVERY] Gracefully recovered session for UUID: ${socket.user_uuid} with partner ${partnerId}`);
@@ -444,19 +596,16 @@ io.on('connection', async (socket) => {
         let uid = socket.user_uuid;
         let now_ms = Date.now();
 
-        // Clear any lingering reconnect hold for this user
-        if (pending_reconnects.has(uid)) {
-            const pending = pending_reconnects.get(uid);
-            clearTimeout(pending.timeout);
-            pending_reconnects.delete(uid);
+        const pendingReconnect = await getPendingReconnect(uid);
+        if (pendingReconnect) {
+            clearTimeout(pendingReconnect.timeout);
+            await deletePendingReconnect(uid);
         }
 
-        // 1. Initialize tracker
         if (!spam_cache[uid]) {
             spam_cache[uid] = { strikes: 0, last_hit: 0 };
         }
 
-        // 2. Cooldown check (300ms)
         let time_gap = now_ms - spam_cache[uid].last_hit;
         spam_cache[uid].last_hit = now_ms;
 
@@ -471,60 +620,56 @@ io.on('connection', async (socket) => {
             spam_cache[uid].strikes = 0;
         }
 
-        // 3. Matchmaking
-        cleanUpUserSession(socket, false);
+        await cleanUpUserSession(socket, false);
 
-        // Filter out dead/stale sockets and self from queue
-        standbyQueue = standbyQueue.filter(id => id !== socket.id && io.sockets.sockets.has(id));
+        // Remove stale duplicate entries before claiming one candidate.
+        await removeSocketFromQueue(socket.id);
 
         let matchedPeerSocket = null;
-        while (standbyQueue.length > 0) {
-            const candidateId = standbyQueue.shift();
-            const candidateSocket = io.sockets.sockets.get(candidateId);
-            // Verify candidate is still alive and not in an active session
-            if (candidateSocket && !activePairs[candidateId]) {
+        while (!matchedPeerSocket) {
+            const candidateId = await popNextMatchCandidate();
+            if (!candidateId) break;
+            if (candidateId === socket.id) continue;
+
+            const candidateSocket = await getSocketById(candidateId);
+            const candidateSession = await getActiveSession(candidateId);
+            if (candidateSocket && !candidateSession) {
                 matchedPeerSocket = candidateSocket;
                 break;
             }
         }
 
         if (!matchedPeerSocket) {
-            standbyQueue.push(socket.id);
+            await enqueueSocketForMatching(socket.id);
             socket.emit('waiting', { message: 'Looking for a stranger...' });
         } else {
             const peerId = matchedPeerSocket.id;
-
-            // Unguessable 128-bit Cryptographic Room ID & Strict 1-on-1 Locking
             const sessionRoomId = `room_${crypto.randomUUID()}`;
 
             socket.join(sessionRoomId);
-            matchedPeerSocket.join(sessionRoomId);
+            await matchedPeerSocket.join(sessionRoomId);
 
-            activePairs[socket.id] = { partnerId: peerId, roomId: sessionRoomId, reported: false };
-            activePairs[peerId] = { partnerId: socket.id, roomId: sessionRoomId, reported: false };
+            await setActiveSession(socket.id, { partnerId: peerId, roomId: sessionRoomId, reported: false });
+            await setActiveSession(peerId, { partnerId: socket.id, roomId: sessionRoomId, reported: false });
 
             const iceServers = await getTurnServers();
-
             socket.emit('matched', { roomId: sessionRoomId, createOffer: true, iceServers });
             io.to(peerId).emit('matched', { roomId: sessionRoomId, createOffer: false, iceServers });
         }
     });
 
-    socket.on('send_signal', (data) => {
+    socket.on('send_signal', async (data) => {
         if (!data || typeof data !== 'object') return;
 
-        // Rate limiting check
         if (!checkSignalRateLimit(socket)) return;
 
-        // Payload size safety checks (prevent memory flooding attacks)
         if (data.sdp && (typeof data.sdp !== 'object' || JSON.stringify(data.sdp).length > 65536)) return;
         if (data.iceCandidate && (typeof data.iceCandidate !== 'object' || JSON.stringify(data.iceCandidate).length > 4096)) return;
 
-        // Edge Case 1: Strict Bi-directional Pairing Integrity Check
-        const session = activePairs[socket.id];
+        const session = await getActiveSession(socket.id);
         if (!session || !session.partnerId) return;
 
-        const partnerSession = activePairs[session.partnerId];
+        const partnerSession = await getActiveSession(session.partnerId);
         if (!partnerSession || partnerSession.partnerId !== socket.id) {
             console.warn(`[SECURITY] Blocked signal injection: Socket ${socket.id} attempted to signal mismatched partner ${session.partnerId}`);
             return;
@@ -536,11 +681,12 @@ io.on('connection', async (socket) => {
         });
     });
 
-    // Safety: The Snitch Button with single-use per session
-    socket.on('snitch_on_partner', () => {
-        const session = activePairs[socket.id];
+    socket.on('snitch_on_partner', async () => {
+        const session = await getActiveSession(socket.id);
         if (session && !session.reported) {
             session.reported = true;
+            await setActiveSession(socket.id, session);
+
             const badGuyId = session.partnerId;
             const badGuySocket = io.sockets.sockets.get(badGuyId);
 
@@ -563,16 +709,15 @@ io.on('connection', async (socket) => {
                 }
             }
 
-            cleanUpUserSession(socket, false);
+            await cleanUpUserSession(socket, false);
         }
     });
 
-    // Intentional leave (Next button, tab close, logout) -> immediate zero-lag disconnect
-    socket.on('leave_partner', () => {
-        cleanUpUserSession(socket, false);
+    socket.on('leave_partner', async () => {
+        await cleanUpUserSession(socket, false);
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
         const ip = socket.user_ip;
         if (ip && ip_connection_counts.has(ip)) {
             const count = ip_connection_counts.get(ip) - 1;
@@ -580,9 +725,8 @@ io.on('connection', async (socket) => {
             else ip_connection_counts.set(ip, count);
         }
         signal_rate_limits.delete(socket.id);
-        
-        // Treat unexpected socket drop with graceful reconnect grace period
-        cleanUpUserSession(socket, true);
+
+        await cleanUpUserSession(socket, true);
     });
 });
 
@@ -591,56 +735,53 @@ io.on('connection', async (socket) => {
  * @param {Socket} socket 
  * @param {boolean} isUnexpectedDisconnect If true, holds room for 8 seconds to allow Wi-Fi/4G switch
  */
-function cleanUpUserSession(socket, isUnexpectedDisconnect = false) {
-    standbyQueue = standbyQueue.filter(id => id !== socket.id);
-    const session = activePairs[socket.id];
+async function cleanUpUserSession(socket, isUnexpectedDisconnect = false) {
+    await removeSocketFromQueue(socket.id);
+    const session = await getActiveSession(socket.id);
 
     if (session) {
         const partnerId = session.partnerId;
         const roomId = session.roomId;
-        const partnerSocket = io.sockets.sockets.get(partnerId);
+        const partnerSocket = await getSocketById(partnerId);
 
-        if (isUnexpectedDisconnect && partnerSocket && io.sockets.sockets.has(partnerId)) {
-            // Edge Case 2: Start 8-Second Grace Period for Network Transitions (Elevator / Wi-Fi to 4G)
-            io.to(partnerId).emit('partner_reconnecting', { 
-                message: 'Stranger connection lost. Waiting for reconnect (8s)...' 
+        if (isUnexpectedDisconnect && partnerSocket) {
+            io.to(partnerId).emit('partner_reconnecting', {
+                message: 'Stranger connection lost. Waiting for reconnect (8s)...'
             });
 
-            const timer = setTimeout(() => {
-                pending_reconnects.delete(socket.user_uuid);
-                if (io.sockets.sockets.has(partnerId)) {
+            const timer = setTimeout(async () => {
+                await deletePendingReconnect(socket.user_uuid);
+                const reconnectingPartner = await getSocketById(partnerId);
+                if (reconnectingPartner) {
                     io.to(partnerId).emit('partner_disconnected', { message: 'Stranger disconnected.' });
-                    const pSock = io.sockets.sockets.get(partnerId);
-                    if (pSock) pSock.leave(roomId);
-                    delete activePairs[partnerId];
+                    await reconnectingPartner.leave(roomId);
+                    await deleteActiveSession(partnerId);
                 }
             }, 8000);
 
-            pending_reconnects.set(socket.user_uuid, {
-                partnerId: partnerId,
-                roomId: roomId,
+            await setPendingReconnect(socket.user_uuid, {
+                partnerId,
+                roomId,
                 timeout: timer
             });
 
-            delete activePairs[socket.id];
+            await deleteActiveSession(socket.id);
         } else {
-            // Clean/intentional disconnection or partner already gone
             io.to(partnerId).emit('partner_disconnected', { message: 'Stranger disconnected.' });
             if (partnerSocket) partnerSocket.leave(roomId);
             socket.leave(roomId);
 
-            delete activePairs[socket.id];
-            delete activePairs[partnerId];
+            await deleteActiveSession(socket.id);
+            await deleteActiveSession(partnerId);
         }
     }
 }
 
 // Zombie Connection & Memory Cleanup Sweeper (Runs every 30 seconds)
-setInterval(() => {
-    // 1. Purge standbyQueue from dead sockets
-    standbyQueue = standbyQueue.filter(id => io.sockets.sockets.has(id));
+setInterval(async () => {
+    const queueSnapshot = await getQueueSnapshot();
+    standbyQueue = queueSnapshot.filter(id => io.sockets.sockets.has(id));
 
-    // 2. Clean activePairs from orphaned sessions (ignoring active reconnect holds)
     const activeSocketIds = Object.keys(activePairs);
     for (const socketId of activeSocketIds) {
         const session = activePairs[socketId];
@@ -649,7 +790,6 @@ setInterval(() => {
         }
     }
 
-    // 3. Prune old spam_cache entries older than 15 minutes to prevent memory leak
     const now = Date.now();
     for (const uid in spam_cache) {
         if (now - spam_cache[uid].last_hit > 15 * 60 * 1000) {
@@ -657,7 +797,6 @@ setInterval(() => {
         }
     }
 
-    // 4. Prune signal rate limit trackers
     for (const [id, record] of signal_rate_limits.entries()) {
         if (now > record.resetTime) {
             signal_rate_limits.delete(id);
